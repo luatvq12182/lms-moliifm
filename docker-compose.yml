@@ -1,0 +1,61 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: lms_mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASS}
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - lms_net
+
+  be:
+    build:
+      context: ./be
+    container_name: lms_be
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 7474
+
+      # db
+      MONGO_URI: ${MONGO_URI}
+
+      # jwt
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN}
+
+      # google oauth (nếu dùng)
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      GOOGLE_REFRESH_TOKEN: ${GOOGLE_REFRESH_TOKEN}
+      GOOGLE_DRIVE_FOLDER_ID: ${GOOGLE_DRIVE_FOLDER_ID}
+    depends_on:
+      - mongo
+    volumes:
+      # nếu bạn vẫn lưu uploads local (multer) thì mount để không mất khi restart
+      - be_uploads:/app/uploads
+    networks:
+      - lms_net
+
+  fe:
+    build:
+      context: ./fe
+    container_name: lms_fe
+    restart: unless-stopped
+    depends_on:
+      - be
+    ports:
+      - "80:80"
+    networks:
+      - lms_net
+
+volumes:
+  mongo_data:
+  be_uploads:
+
+networks:
+  lms_net:
+    driver: bridge
