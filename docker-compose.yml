@@ -13,7 +13,7 @@ services:
 
   be:
     build:
-      context: ./be
+      context: ./lms-be
     container_name: lms_be
     restart: unless-stopped
     environment:
@@ -42,13 +42,13 @@ services:
 
   fe:
     build:
-      context: ./fe
+      context: ./lms-fe
     container_name: lms_fe
     restart: unless-stopped
     depends_on:
       - be
     ports:
-      - "80:80"
+      - "127.0.0.1:8080:80"
     networks:
       - lms_net
 

@@ -1,5 +1,11 @@
 require("dotenv").config();
 const app = require("./app");
+const fs = require("fs");
+const path = require("path");
+
+const dir = path.join(__dirname, "..", "uploads", "materials");
+fs.mkdirSync(dir, { recursive: true });
+
 const { connectDB } = require("./config/db");
 
 async function main() {
