@@ -1,17 +1,42 @@
 import React, { useMemo, useState } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { NavLink, Outlet, useLocation, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
+import { absUrl } from "../utils/url";
 
 const nav = [
-    { to: "/admin", label: "Tổng quan" },
-    { to: "/admin/courses", label: "Khoá học" },
-    { to: "/admin/classes", label: "Lớp học" },
+    // { to: "/admin", label: "Tổng quan" },
+    // { to: "/admin/courses", label: "Khoá học" },
+    // { to: "/admin/classes", label: "Lớp học" },
     { to: "/admin/teachers", label: "Giảng viên" },
     { to: "/admin/materials", label: "Tài liệu / Slide" },
+    { to: "/admin/activity-logs", label: "Nhật ký hoạt động" },
+    { to: "/admin/profile", label: "Hồ sơ" }, // ✅ thêm
 ];
 
 function cls(...a) {
     return a.filter(Boolean).join(" ");
+}
+
+function AvatarCircle({ url, name }) {
+    const letter = String(name || "A")
+        .trim()
+        .slice(0, 1)
+        .toUpperCase();
+    return (
+        <div className="h-10 w-10 shrink-0 overflow-hidden rounded-xl border border-zinc-200 bg-white">
+            {url ? (
+                <img
+                    src={absUrl(url)}
+                    alt="avatar"
+                    className="h-full w-full object-cover"
+                />
+            ) : (
+                <div className="grid h-full w-full place-items-center text-zinc-700">
+                    {letter}
+                </div>
+            )}
+        </div>
+    );
 }
 
 function SidebarContent({ collapsed, onNavigate }) {
@@ -67,13 +92,17 @@ function SidebarContent({ collapsed, onNavigate }) {
             <div className="shrink-0 border-t border-zinc-200 bg-white p-4 sticky bottom-0">
                 <div className={collapsed ? "hidden" : "block"}>
                     <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
-                        <div className="flex items-center gap-3">
-                            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white border border-zinc-200 text-zinc-700">
-                                {String(user?.name || "A")
-                                    .trim()
-                                    .slice(0, 1)
-                                    .toUpperCase()}
-                            </div>
+                        {/* ✅ link tới profile */}
+                        <Link
+                            to="/admin/profile"
+                            onClick={() => onNavigate?.()}
+                            className="flex items-center gap-3 rounded-xl p-1 hover:bg-white"
+                            title="Xem hồ sơ"
+                        >
+                            <AvatarCircle
+                                url={absUrl(user?.avatarUrl)}
+                                name={user?.name}
+                            />
                             <div className="min-w-0">
                                 <div className="truncate text-sm font-semibold text-zinc-900">
                                     {user?.name || "Admin"}
@@ -81,8 +110,11 @@ function SidebarContent({ collapsed, onNavigate }) {
                                 <div className="truncate text-xs text-zinc-500">
                                     {user?.email || "admin@trungtam.com"}
                                 </div>
+                                <div className="mt-1 text-[11px] text-zinc-500">
+                                    Bấm để đổi ảnh đại diện
+                                </div>
                             </div>
-                        </div>
+                        </Link>
 
                         <button
                             onClick={logout}
@@ -94,7 +126,7 @@ function SidebarContent({ collapsed, onNavigate }) {
                     </div>
                 </div>
 
-                {/* collapsed mode: chỉ show icon */}
+                {/* collapsed mode */}
                 <div className={collapsed ? "block" : "hidden"}>
                     <button
                         onClick={logout}
@@ -111,8 +143,8 @@ function SidebarContent({ collapsed, onNavigate }) {
 }
 
 export default function AdminLayout() {
-    const [collapsed, setCollapsed] = useState(false); // desktop collapse
-    const [mobileOpen, setMobileOpen] = useState(false); // mobile drawer
+    const [collapsed, setCollapsed] = useState(false);
+    const [mobileOpen, setMobileOpen] = useState(false);
     const location = useLocation();
 
     const title = useMemo(() => {
@@ -124,6 +156,7 @@ export default function AdminLayout() {
             return "Giảng viên";
         if (location.pathname.startsWith("/admin/materials"))
             return "Tài liệu / Slide";
+        if (location.pathname.startsWith("/admin/profile")) return "Hồ sơ";
         return "Bảng điều khiển";
     }, [location.pathname]);
 
@@ -182,11 +215,9 @@ export default function AdminLayout() {
 
                 {/* main */}
                 <main className="flex-1">
-                    {/* topbar */}
                     <header className="sticky top-0 z-10 border-b border-zinc-200 bg-white/80 backdrop-blur">
                         <div className="flex items-center justify-between px-4 py-3 md:px-6 md:py-4">
                             <div className="flex items-center gap-3">
-                                {/* hamburger mobile */}
                                 <button
                                     onClick={() => setMobileOpen(true)}
                                     className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm hover:bg-zinc-50 md:hidden"
@@ -207,7 +238,6 @@ export default function AdminLayout() {
                         </div>
                     </header>
 
-                    {/* content */}
                     <div className="px-4 py-4 md:px-6 md:py-6">
                         <Outlet />
                     </div>

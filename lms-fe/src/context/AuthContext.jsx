@@ -40,10 +40,19 @@ export function AuthProvider({ children }) {
         setUser(null);
     };
 
+    const updateUser = (patch) => {
+        setUser((prev) => {
+            const next = { ...(prev || {}), ...(patch || {}) };
+            localStorage.setItem("lms_user", JSON.stringify(next)); // đổi key đúng với bạn
+            return next;
+        });
+    };
+
     const value = useMemo(
         () => ({
             token,
             user,
+            updateUser,
             isAuthed: Boolean(token),
             login,
             logout,

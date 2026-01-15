@@ -1,4 +1,5 @@
 const User = require("../models/User");
+const { writeLog } = require("../services/activityLog.service");
 const { signToken } = require("../utils/jwt");
 
 async function login(req, res) {
@@ -15,6 +16,12 @@ async function login(req, res) {
 
     const ok = await user.comparePassword(password);
     if (!ok) return res.status(401).json({ message: "invalid credentials" });
+
+    if (user.role === "teacher") {
+        req.user = { _id: user._id, role: user.role, email: user.email };
+        // ✅ chỉ log teacher (admin muốn log cũng được, tuỳ bạn)
+        writeLog(req, "LOGIN").catch(() => { });
+    }
 
     const token = signToken(user, {
         secret: process.env.JWT_SECRET,

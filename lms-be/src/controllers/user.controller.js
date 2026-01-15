@@ -1,3 +1,5 @@
+const fs = require("fs");
+const path = require("path");
 const User = require("../models/User");
 
 async function getMe(req, res) {
@@ -71,6 +73,48 @@ async function updateUser(req, res) {
     return res.json({ user: updated.toSafeJSON() });
 }
 
+function toPublicAvatarUrl(filePathAbs) {
+    // /app/uploads/avatars/abc.jpg -> /uploads/avatars/abc.jpg
+    const idx = filePathAbs.lastIndexOf("/uploads/");
+    return idx >= 0 ? filePathAbs.slice(idx) : "";
+}
+
+async function updateMyAvatar(req, res) {
+    if (!req.file) return res.status(400).json({ message: "missing file" });
+
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ message: "not found" });
+
+    // xoá avatar cũ (nếu là file local)
+    if (user.avatarUrl && user.avatarUrl.startsWith("/uploads/")) {
+        const oldAbs = path.join(__dirname, "..", "..", user.avatarUrl);
+        fs.unlink(oldAbs, () => { });
+    }
+
+    user.avatarUrl = toPublicAvatarUrl(req.file.path);
+    await user.save();
+
+    return res.json({ avatarUrl: user.avatarUrl });
+}
+
+async function updateUserAvatarByAdmin(req, res) {
+    if (req.user.role !== "admin") return res.status(403).json({ message: "forbidden" });
+    if (!req.file) return res.status(400).json({ message: "missing file" });
+
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ message: "not found" });
+
+    if (user.avatarUrl && user.avatarUrl.startsWith("/uploads/")) {
+        const oldAbs = path.join(__dirname, "..", "..", user.avatarUrl);
+        fs.unlink(oldAbs, () => { });
+    }
+
+    user.avatarUrl = toPublicAvatarUrl(req.file.path);
+    await user.save();
+
+    return res.json({ avatarUrl: user.avatarUrl });
+}
+
 module.exports = {
     getMe,
     updateMe,
@@ -78,4 +122,6 @@ module.exports = {
     adminListUsers,
     adminGetUser,
     updateUser,
+    updateMyAvatar,
+    updateUserAvatarByAdmin,
 };

@@ -7,15 +7,11 @@ const MaterialSchema = new mongoose.Schema(
         mimeType: { type: String, required: true },
         ext: { type: String, trim: true },
         size: { type: Number, required: true },
-        storagePath: { type: String, required: true },
+        storagePath: { type: String, default: "" },
         uploaderId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
 
-        // NEW: scope phân quyền
-        scope: { type: String, enum: ["public", "course", "class"], default: "class", index: true },
-
-        // NEW: gắn vào course/class tuỳ scope
-        courseId: { type: mongoose.Schema.Types.ObjectId, ref: "Course", default: null, index: true },
-        classId: { type: mongoose.Schema.Types.ObjectId, ref: "Class", default: null, index: true },
+        // ✅ folder ảo
+        folderId: { type: mongoose.Schema.Types.ObjectId, ref: "Folder", default: null },
 
         google: {
             fileId: { type: String, default: null },

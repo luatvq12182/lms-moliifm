@@ -2,11 +2,13 @@ const fs = require("fs");
 const path = require("path");
 const Material = require("../models/Material");
 const ClassModel = require("../models/Class");
-const Course = require("../models/Course");
+const Folder = require("../models/Folder");
 const {
     uploadPptxAsGoogleSlides,
     setPermissionAnyoneReader,
 } = require("../services/googleDrive.service");
+const { getTeacherAccessIds } = require("../utils/access");
+const { writeLog } = require("../services/activityLog.service");
 
 function pickExt(filename) {
     return path.extname(filename || "").replace(".", "").toLowerCase();
@@ -29,77 +31,28 @@ async function teacherHasClassAccess(teacherId, classId) {
 }
 
 async function listMaterials(req, res) {
-    const isAdmin = req.user.role === "admin";
-    const { scope, classId, courseId } = req.query;
+    const { folderId, q } = req.query;
 
     const filter = { isActive: true };
-    if (scope) filter.scope = scope;
-    if (classId) filter.classId = classId;
-    if (courseId) filter.courseId = courseId;
 
-    let items = [];
-
-    if (isAdmin) {
-        items = await Material.find(filter)
-            .sort({ createdAt: -1 })
-            .populate("uploaderId", "name email role")
-            .populate("classId", "name")
-            .populate("courseId", "name");
+    // ✅ mặc định root nếu không truyền folderId
+    if (folderId && String(folderId).trim()) {
+        filter.folderId = folderId;   // trong folder
     } else {
-        // teacher: public OR (course match) OR (class match)
-        // 1) public
-        const publicItems = await Material.find({ ...filter, scope: "public" })
-            .sort({ createdAt: -1 })
-            .populate("uploaderId", "name email role")
-            .populate("classId", "name")
-            .populate("courseId", "name");
-
-        // 2) course: courseId thuộc các course teacher có ít nhất 1 lớp
-        const myCourseIds = await ClassModel.distinct("courseId", { teacherIds: req.user._id });
-        const courseItems = await Material.find({
-            ...filter,
-            scope: "course",
-            courseId: { $in: myCourseIds },
-        })
-            .sort({ createdAt: -1 })
-            .populate("uploaderId", "name email role")
-            .populate("classId", "name")
-            .populate("courseId", "name");
-
-        // 3) class: classId thuộc các lớp teacher được gán
-        const myClassIds = await ClassModel.distinct("_id", { teacherIds: req.user._id });
-        const classItems = await Material.find({
-            ...filter,
-            scope: "class",
-            classId: { $in: myClassIds },
-        })
-            .sort({ createdAt: -1 })
-            .populate("uploaderId", "name email role")
-            .populate("classId", "name")
-            .populate("courseId", "name");
-
-        // merge + unique
-        const map = new Map();
-        [...publicItems, ...courseItems, ...classItems].forEach((x) => map.set(String(x._id), x));
-        items = Array.from(map.values()).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        filter.folderId = null;       // root
     }
 
-    return res.json({
-        items: items.map((m) => ({
-            _id: m._id,
-            title: m.title,
-            originalName: m.originalName,
-            mimeType: m.mimeType,
-            ext: m.ext,
-            size: m.size,
-            scope: m.scope,
-            isActive: m.isActive,
-            createdAt: m.createdAt,
-            uploader: m.uploaderId,
-            class: m.classId,
-            course: m.courseId,
-        })),
-    });
+    if (q && String(q).trim()) {
+        const kw = String(q).trim();
+        filter.$or = [
+            { title: { $regex: kw, $options: "i" } },
+            { originalName: { $regex: kw, $options: "i" } },
+        ];
+    }
+
+    const items = await Material.find(filter).sort({ createdAt: -1 });
+
+    return res.json({ items });
 }
 
 /**
@@ -108,32 +61,19 @@ async function listMaterials(req, res) {
  * file: multipart "file"
  */
 async function uploadMaterial(req, res) {
-    const { scope = "class", title, courseId, classId } = req.body || {};
+    const { title, folderId } = req.body || {};
     if (!req.file) return res.status(400).json({ message: "file is required" });
 
-    if (!["public", "course", "class"].includes(scope)) {
-        return res.status(400).json({ message: "invalid scope" });
+    if (req.user.role !== "admin") {
+        return res.status(403).json({ message: "forbidden" });
     }
 
-    let finalCourseId = null;
-    let finalClassId = null;
-
-    if (scope === "course") {
-        if (!courseId) return res.status(400).json({ message: "courseId is required" });
-        const c = await Course.findById(courseId);
-        if (!c) return res.status(400).json({ message: "invalid courseId" });
-        finalCourseId = c._id;
+    let finalFolderId = folderId ? String(folderId) : null;
+    if (finalFolderId) {
+        const folder = await Folder.findOne({ _id: finalFolderId, isActive: true }).select("_id");
+        if (!folder) return res.status(400).json({ message: "invalid folderId" });
     }
 
-    if (scope === "class") {
-        if (!classId) return res.status(400).json({ message: "classId is required" });
-        const cls = await ClassModel.findById(classId).select("_id courseId");
-        if (!cls) return res.status(400).json({ message: "invalid classId" });
-        finalClassId = cls._id;
-        finalCourseId = cls.courseId;
-    }
-
-    // ✅ upload+convert -> Google Slides
     const originalName = req.file.originalname;
     const slideName = String(title || originalName).trim();
 
@@ -143,15 +83,9 @@ async function uploadMaterial(req, res) {
     });
 
     fs.unlink(req.file.path, (err) => {
-        if (err) {
-            console.error("Failed to remove local file:", err);
-        }
+        if (err) console.error("Failed to remove local file:", err);
     });
 
-    // ✅ permission (bản tối giản để iframe xem được)
-    // - public: anyone reader
-    // - course/class: vẫn cần anyone reader để iframe hoạt động nếu giáo viên không login Google
-    // (Nếu bạn dùng Workspace domain thì đổi sang domain reader)
     await setPermissionAnyoneReader(fileId);
 
     const doc = await Material.create({
@@ -160,22 +94,14 @@ async function uploadMaterial(req, res) {
         mimeType: req.file.mimetype,
         ext: "pptx",
         size: req.file.size,
-        storagePath: req.file.path, // lưu lại local path (tuỳ bạn muốn xoá sau)
         uploaderId: req.user._id,
-        scope,
-        courseId: finalCourseId,
-        classId: finalClassId,
+        folderId: finalFolderId,
         isActive: true,
-
         provider: "google",
         google: { fileId, previewUrl, webViewLink },
     });
 
-    const populated = await Material.findById(doc._id)
-        .populate("uploaderId", "name email role")
-        .populate("classId", "name")
-        .populate("courseId", "name");
-
+    const populated = await Material.findById(doc._id).populate("uploaderId", "name email role");
     return res.status(201).json({ material: populated });
 }
 
@@ -252,33 +178,32 @@ async function getEmbed(req, res) {
     const m = await Material.findById(req.params.id);
     if (!m || !m.isActive) return res.status(404).json({ message: "not found" });
 
-    // chỉ hỗ trợ google provider
-    const url = m.google?.previewUrl;
-    if (!url) return res.status(400).json({ message: "material has no previewUrl" });
-
-    // ✅ admin luôn được xem
-    if (req.user.role === "admin") {
-        return res.json({ previewUrl: url });
+    // ✅ log teacher view
+    if (req.user?.role === "teacher") {
+        writeLog(req, "MATERIAL_VIEW", {
+            materialId: m._id,
+            folderId: m.folderId || null,
+            meta: {
+                title: m.title,
+                originalName: m.originalName,
+            },
+        }).catch(() => { });
     }
 
-    // ✅ teacher: check theo scope
-    if (m.scope === "public") {
-        return res.json({ previewUrl: url });
-    }
+    return res.json({ previewUrl: m.google?.previewUrl });
+}
 
-    if (m.scope === "course") {
-        const ok = await teacherHasCourseAccess(req.user._id, m.courseId);
-        if (!ok) return res.status(403).json({ message: "forbidden" });
-        return res.json({ previewUrl: url });
-    }
+function buildMaterialPermissionFilter(user, access) {
+    if (user.role === "admin") return { isActive: true };
 
-    if (m.scope === "class") {
-        const ok = await teacherHasClassAccess(req.user._id, m.classId);
-        if (!ok) return res.status(403).json({ message: "forbidden" });
-        return res.json({ previewUrl: url });
-    }
-
-    return res.status(403).json({ message: "forbidden" });
+    return {
+        isActive: true,
+        $or: [
+            { scope: "public" },
+            { scope: "course", courseId: { $in: access.allowedCourseIds } },
+            { scope: "class", classId: { $in: access.allowedClassIds } },
+        ],
+    };
 }
 
 module.exports = {

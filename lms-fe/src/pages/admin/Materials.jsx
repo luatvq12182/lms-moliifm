@@ -1,13 +1,17 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../../context/AuthContext.jsx";
-import { listClassesApi } from "../../api/classes";
-import { listCoursesApi } from "../../api/courses";
 import {
     listMaterialsApi,
     uploadMaterialApi,
-    openMaterialFile,
     deleteMaterialApi,
 } from "../../api/materials";
+import {
+    listFoldersApi,
+    getFolderPathApi,
+    createFolderApi,
+    updateFolderApi,
+    deleteFolderApi,
+} from "../../api/folders";
 
 function pickIcon(name = "", mime = "") {
     const n = (name || "").toLowerCase();
@@ -57,70 +61,86 @@ function Modal({ open, title, children, onClose }) {
     );
 }
 
+function DriveCrumb({ path, onGoRoot, onGo }) {
+    return (
+        <div className="flex flex-wrap items-center gap-1 text-sm">
+            <button
+                onClick={onGoRoot}
+                className="rounded-lg border border-zinc-200 bg-white px-2 py-1 text-xs hover:bg-zinc-50"
+                title="Về Root"
+            >
+                🏠
+            </button>
+
+            {path.length > 0 && <span className="text-zinc-400">/</span>}
+
+            {path.map((p, idx) => (
+                <React.Fragment key={p._id}>
+                    <button
+                        onClick={() => onGo(p._id)}
+                        className="max-w-[180px] truncate rounded-lg px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
+                        title={p.name}
+                    >
+                        {p.name}
+                    </button>
+                    {idx !== path.length - 1 && (
+                        <span className="text-zinc-400">/</span>
+                    )}
+                </React.Fragment>
+            ))}
+        </div>
+    );
+}
+
 export default function Materials() {
     const { token, user } = useAuth();
 
-    const [classes, setClasses] = useState([]);
+    // drive state
+    const [folderId, setFolderId] = useState(""); // "" = root
+    const [path, setPath] = useState([]);
+    const [folders, setFolders] = useState([]);
     const [materials, setMaterials] = useState([]);
 
-    const [courses, setCourses] = useState([]);
-    const [uScope, setUScope] = useState("class");
-    const [uCourseId, setUCourseId] = useState("");
-
-    const [classId, setClassId] = useState("");
+    // search
     const [q, setQ] = useState("");
-
-    const [loading, setLoading] = useState(true);
-    const [err, setErr] = useState("");
 
     // upload
     const [openUpload, setOpenUpload] = useState(false);
-    const [uClassId, setUClassId] = useState("");
     const [uTitle, setUTitle] = useState("");
     const [uFile, setUFile] = useState(null);
     const [uploading, setUploading] = useState(false);
 
-    async function refreshMaterials(nextClassId = classId) {
+    // create folder
+    const [openCreateFolder, setOpenCreateFolder] = useState(false);
+    const [fName, setFName] = useState("");
+
+    // edit folder
+    const [openEditFolder, setOpenEditFolder] = useState(false);
+    const [editFolder, setEditFolder] = useState(null);
+    const [efName, setEFName] = useState("");
+
+    const [loading, setLoading] = useState(true);
+    const [err, setErr] = useState("");
+
+    async function refreshDrive(nextFolderId = folderId, nextQ = q) {
         setErr("");
         setLoading(true);
         try {
-            const m = await listMaterialsApi(
-                token,
-                nextClassId ? { classId: nextClassId } : {}
-            );
+            const [fo, pa] = await Promise.all([
+                listFoldersApi(token, { parentId: nextFolderId }),
+                nextFolderId
+                    ? getFolderPathApi(token, nextFolderId)
+                    : Promise.resolve({ path: [] }),
+            ]);
+
+            setFolders(fo.folders || []);
+            setPath(pa.path || []);
+
+            const m = await listMaterialsApi(token, {
+                folderId: nextFolderId || "", // "" => root
+                q: nextQ.trim() ? nextQ.trim() : undefined,
+            });
             setMaterials(m.items || []);
-        } catch (e) {
-            setErr(e.message || "Load thất bại");
-        } finally {
-            setLoading(false);
-        }
-    }
-
-    async function init() {
-        setErr("");
-        setLoading(true);
-        try {
-            const c = await listClassesApi(token); // teacher: chỉ lớp được gán
-            const items = c.items || [];
-            setClasses(items);
-
-            const first = items[0]?._id || "";
-            setClassId(first);
-            setUClassId(first);
-
-            const m = await listMaterialsApi(
-                token,
-                first ? { classId: first } : {}
-            );
-            setMaterials(m.items || []);
-
-            // trong init() sau khi load classes:
-            if (user?.role === "admin") {
-                const c2 = await listCoursesApi(token);
-                const arr = (c2.items || []).map((x) => x.course);
-                setCourses(arr);
-                setUCourseId(arr[0]?._id || "");
-            }
         } catch (e) {
             setErr(e.message || "Load thất bại");
         } finally {
@@ -129,11 +149,12 @@ export default function Materials() {
     }
 
     useEffect(() => {
-        init();
+        setFolderId("");
+        refreshDrive("", "");
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    const filtered = useMemo(() => {
+    const filteredMaterials = useMemo(() => {
         const k = q.trim().toLowerCase();
         if (!k) return materials;
         return materials.filter((m) => {
@@ -143,32 +164,43 @@ export default function Materials() {
         });
     }, [materials, q]);
 
-    async function onChangeClass(e) {
-        const id = e.target.value;
-        setClassId(id);
-        await refreshMaterials(id);
+    async function onEnterFolder(id) {
+        setFolderId(id);
+        await refreshDrive(id, q);
+    }
+
+    async function onGoRoot() {
+        setFolderId("");
+        await refreshDrive("", q);
+    }
+
+    async function onGoCrumb(id) {
+        setFolderId(id);
+        await refreshDrive(id, q);
+    }
+
+    async function onRefresh() {
+        await refreshDrive(folderId, q);
     }
 
     async function onUpload(e) {
         e.preventDefault();
-        if (!uClassId) return setErr("Bạn chưa chọn lớp");
         if (!uFile) return setErr("Bạn chưa chọn file");
 
         setErr("");
         setUploading(true);
         try {
             await uploadMaterialApi(token, {
-                scope: uScope,
-                courseId: uScope === "course" ? uCourseId : undefined,
-                classId: uScope === "class" ? uClassId : undefined,
                 title: uTitle,
                 file: uFile,
+                folderId: folderId || null, // root => null
             });
+
             setOpenUpload(false);
             setUTitle("");
             setUFile(null);
-            // nếu đang lọc đúng class -> refresh
-            if (uClassId === classId) await refreshMaterials(uClassId);
+
+            await refreshDrive(folderId, q);
         } catch (e2) {
             setErr(e2.message || "Upload thất bại");
         } finally {
@@ -176,25 +208,78 @@ export default function Materials() {
         }
     }
 
-    async function onOpen(m) {
-        setErr("");
-        try {
-            await openMaterialFile(token, m._id);
-        } catch (e) {
-            setErr(e.message || "Không mở được file");
-        }
-    }
-
-    async function onDelete(m) {
+    async function onDeleteMaterial(m) {
         if (user?.role !== "admin") return;
         if (!confirm(`Xoá tài liệu "${m.title}"?`)) return;
 
         setErr("");
         try {
             await deleteMaterialApi(token, m._id);
-            await refreshMaterials(classId);
+            await refreshDrive(folderId, q);
         } catch (e) {
             setErr(e.message || "Xoá thất bại");
+        }
+    }
+
+    async function onCreateFolder(e) {
+        e.preventDefault();
+        if (!fName.trim()) return setErr("Bạn chưa nhập tên folder");
+
+        setErr("");
+        try {
+            await createFolderApi(token, {
+                name: fName.trim(),
+                parentId: folderId || null,
+            });
+
+            setOpenCreateFolder(false);
+            setFName("");
+            await refreshDrive(folderId, q);
+        } catch (e2) {
+            setErr(e2.message || "Tạo folder thất bại");
+        }
+    }
+
+    async function onDeleteFolder(f) {
+        if (user?.role !== "admin") return;
+        if (
+            !confirm(
+                `Xoá folder "${f.name}"? (sẽ xoá cả folder con + tài liệu bên trong)`
+            )
+        )
+            return;
+
+        setErr("");
+        try {
+            await deleteFolderApi(token, f._id);
+            await refreshDrive(folderId, q);
+        } catch (e) {
+            setErr(e.message || "Xoá folder thất bại");
+        }
+    }
+
+    function openEditFolderModal(f) {
+        setEditFolder(f);
+        setEFName(f?.name || "");
+        setOpenEditFolder(true);
+    }
+
+    async function onSaveFolder(e) {
+        e.preventDefault();
+        if (!editFolder?._id) return;
+        if (!efName.trim()) return setErr("Bạn chưa nhập tên folder");
+
+        setErr("");
+        try {
+            await updateFolderApi(token, editFolder._id, {
+                name: efName.trim(),
+            });
+            setOpenEditFolder(false);
+            setEditFolder(null);
+            setEFName("");
+            await refreshDrive(folderId, q);
+        } catch (e2) {
+            setErr(e2.message || "Cập nhật folder thất bại");
         }
     }
 
@@ -205,48 +290,47 @@ export default function Materials() {
                     <div className="text-base font-semibold">
                         Tài liệu / Slide
                     </div>
-                    <div className="text-sm text-zinc-500">
-                        {user?.role === "admin"
-                            ? "Quản lý tài liệu của tất cả lớp"
-                            : "Chỉ xem tài liệu thuộc lớp bạn được phân công"}
-                    </div>
                 </div>
 
-                <div className="grid gap-2 lg:grid-cols-4">
-                    <select
-                        value={classId}
-                        onChange={onChangeClass}
-                        className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm"
-                    >
-                        {classes.map((c) => (
-                            <option key={c._id} value={c._id}>
-                                {c.name} — {c.course?.name || ""}
-                            </option>
-                        ))}
-                    </select>
-
-                    <input
-                        value={q}
-                        onChange={(e) => setQ(e.target.value)}
-                        placeholder="Tìm theo tên file..."
-                        className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm"
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <DriveCrumb
+                        path={path}
+                        onGoRoot={onGoRoot}
+                        onGo={onGoCrumb}
                     />
 
-                    <button
-                        onClick={() => refreshMaterials(classId)}
-                        className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm hover:bg-zinc-50"
-                    >
-                        Tải lại
-                    </button>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                        <input
+                            value={q}
+                            onChange={(e) => setQ(e.target.value)}
+                            placeholder="Tìm theo tên file..."
+                            className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm sm:w-[320px]"
+                        />
 
-                    {user?.role === "admin" && (
                         <button
-                            onClick={() => setOpenUpload(true)}
-                            className="rounded-xl bg-zinc-900 px-3 py-2 text-sm font-semibold text-white hover:bg-zinc-800"
+                            onClick={onRefresh}
+                            className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm hover:bg-zinc-50"
                         >
-                            + Upload
+                            Tải lại
                         </button>
-                    )}
+
+                        {user?.role === "admin" && (
+                            <>
+                                <button
+                                    onClick={() => setOpenCreateFolder(true)}
+                                    className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm hover:bg-zinc-50"
+                                >
+                                    + Tạo folder
+                                </button>
+                                <button
+                                    onClick={() => setOpenUpload(true)}
+                                    className="rounded-xl bg-zinc-900 px-3 py-2 text-sm font-semibold text-white hover:bg-zinc-800"
+                                >
+                                    + Upload
+                                </button>
+                            </>
+                        )}
+                    </div>
                 </div>
             </div>
 
@@ -256,80 +340,71 @@ export default function Materials() {
                 </div>
             )}
 
-            {/* list */}
-            <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white ">
+            <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white">
                 <div className="grid grid-cols-12 border-b border-zinc-200 bg-zinc-50 px-4 py-3 text-xs font-semibold text-zinc-600">
-                    <div className="col-span-6">Tên</div>
-                    <div className="col-span-2">Người upload</div>
+                    <div className="col-span-7">Tên</div>
+                    <div className="col-span-2">Loại</div>
                     <div className="col-span-3 text-right">Thao tác</div>
-                    <div className="col-span-1 text-right">...</div>
                 </div>
 
                 {loading ? (
                     <div className="px-4 py-4 text-sm">Đang tải...</div>
-                ) : filtered.length === 0 ? (
+                ) : folders.length === 0 && filteredMaterials.length === 0 ? (
                     <div className="px-4 py-6 text-sm text-zinc-500">
-                        Chưa có tài liệu
+                        Thư mục trống
                     </div>
                 ) : (
-                    filtered.map((m) => {
-                        const icon = pickIcon(
-                            m.originalName || m.title,
-                            m.mimeType
-                        );
-                        return (
+                    <>
+                        {/* folders */}
+                        {folders.map((f) => (
                             <div
-                                key={m._id}
+                                key={f._id}
                                 className="grid grid-cols-12 items-center gap-3 px-4 py-3 text-sm hover:bg-zinc-50"
                             >
-                                <div className="col-span-6 min-w-0">
-                                    <div className="flex items-center gap-3">
-                                        <div
-                                            className={`grid h-8 w-8 place-items-center rounded-lg text-xs font-bold text-white ${icon.cls}`}
-                                        >
-                                            {icon.label}
+                                <div className="col-span-7 min-w-0">
+                                    <button
+                                        onClick={() => onEnterFolder(f._id)}
+                                        className="flex w-full items-center gap-3 text-left"
+                                        title={f.name}
+                                    >
+                                        <div className="grid h-8 w-8 place-items-center rounded-lg bg-zinc-100 text-zinc-700">
+                                            📁
                                         </div>
-
                                         <div className="min-w-0">
                                             <div className="truncate font-medium">
-                                                {m.title}
-                                            </div>
-                                            <div className="truncate text-xs text-zinc-500">
-                                                {m.originalName} •{" "}
-                                                {fmtSize(m.size)}
+                                                {f.name}
                                             </div>
                                         </div>
-                                    </div>
+                                    </button>
                                 </div>
 
-                                <div className="col-span-2 min-w-0">
-                                    <div className="truncate text-sm text-zinc-700">
-                                        {m.uploader?.name || "-"}
-                                    </div>
-                                    <div className="truncate text-xs text-zinc-500">
-                                        {m.course?.name || ""} •{" "}
-                                        {m.class?.name || ""}
-                                    </div>
+                                <div className="col-span-2 text-xs text-zinc-600">
+                                    Folder
                                 </div>
 
                                 <div className="col-span-3 text-right">
-                                    <a
-                                        href={`/viewer/${m._id}`}
-                                        className="rounded-lg border border-zinc-200 px-3 py-1 text-xs hover:bg-white"
-                                    >
-                                        Trình chiếu
-                                    </a>
-                                </div>
-
-                                <div className="col-span-1 text-right">
                                     {user?.role === "admin" ? (
-                                        <button
-                                            onClick={() => onDelete(m)}
-                                            className="rounded-lg border border-red-200 bg-red-50 px-3 py-1 text-xs text-red-700 hover:bg-red-100"
-                                            title="Xoá"
-                                        >
-                                            Xoá
-                                        </button>
+                                        <div className="flex justify-end gap-2">
+                                            <button
+                                                onClick={() =>
+                                                    openEditFolderModal(f)
+                                                }
+                                                className="rounded-lg border border-zinc-200 bg-white px-3 py-1 text-xs hover:bg-zinc-50"
+                                                title="Sửa tên folder"
+                                            >
+                                                Sửa
+                                            </button>
+
+                                            <button
+                                                onClick={() =>
+                                                    onDeleteFolder(f)
+                                                }
+                                                className="rounded-lg border border-red-200 bg-red-50 px-3 py-1 text-xs text-red-700 hover:bg-red-100"
+                                                title="Xoá folder"
+                                            >
+                                                Xoá
+                                            </button>
+                                        </div>
                                     ) : (
                                         <span className="text-xs text-zinc-400">
                                             {" "}
@@ -337,8 +412,72 @@ export default function Materials() {
                                     )}
                                 </div>
                             </div>
-                        );
-                    })
+                        ))}
+
+                        {/* materials */}
+                        {filteredMaterials.map((m) => {
+                            const icon = pickIcon(
+                                m.originalName || m.title,
+                                m.mimeType
+                            );
+                            return (
+                                <div
+                                    key={m._id}
+                                    className="grid grid-cols-12 items-center gap-3 px-4 py-3 text-sm hover:bg-zinc-50"
+                                >
+                                    <div className="col-span-7 min-w-0">
+                                        <div className="flex items-center gap-3">
+                                            <div
+                                                className={`grid h-8 w-8 place-items-center rounded-lg text-xs font-bold text-white ${icon.cls}`}
+                                            >
+                                                {icon.label}
+                                            </div>
+
+                                            <div className="min-w-0">
+                                                <div className="truncate font-medium">
+                                                    {m.title}
+                                                </div>
+                                                <div className="truncate text-xs text-zinc-500">
+                                                    {m.originalName} •{" "}
+                                                    {fmtSize(m.size)}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="col-span-2 text-xs text-zinc-600">
+                                        File
+                                    </div>
+
+                                    <div className="col-span-3 text-right">
+                                        <div className="flex justify-end gap-2">
+                                            <a
+                                                href={`/viewer/${m._id}`}
+                                                className="rounded-lg border border-zinc-200 px-3 py-1 text-xs hover:bg-white"
+                                            >
+                                                Xem
+                                            </a>
+                                            {user?.role === "admin" ? (
+                                                <button
+                                                    onClick={() =>
+                                                        onDeleteMaterial(m)
+                                                    }
+                                                    className="rounded-lg border border-red-200 bg-red-50 px-3 py-1 text-xs text-red-700 hover:bg-red-100"
+                                                    title="Xoá"
+                                                >
+                                                    Xoá
+                                                </button>
+                                            ) : (
+                                                <span className="text-xs text-zinc-400">
+                                                    {" "}
+                                                </span>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </>
                 )}
             </div>
 
@@ -349,62 +488,12 @@ export default function Materials() {
                 onClose={() => setOpenUpload(false)}
             >
                 <form onSubmit={onUpload} className="space-y-3">
-                    <div>
-                        <label className="mb-1 block text-sm font-medium text-zinc-700">
-                            Phân quyền
-                        </label>
-                        <select
-                            value={uScope}
-                            onChange={(e) => setUScope(e.target.value)}
-                            className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm"
-                        >
-                            <option value="public">
-                                File công khai (mọi giảng viên xem được)
-                            </option>
-                            <option value="course">File thuộc khoá học</option>
-                            <option value="class">File thuộc lớp</option>
-                        </select>
+                    <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-700">
+                        Upload vào:{" "}
+                        <span className="font-semibold">
+                            {path.length ? path[path.length - 1].name : "Root"}
+                        </span>
                     </div>
-
-                    {uScope === "course" && (
-                        <div>
-                            <label className="mb-1 block text-sm font-medium text-zinc-700">
-                                Chọn khoá học
-                            </label>
-                            <select
-                                value={uCourseId}
-                                onChange={(e) => setUCourseId(e.target.value)}
-                                className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm"
-                                required
-                            >
-                                {courses.map((c) => (
-                                    <option key={c._id} value={c._id}>
-                                        {c.name}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-                    )}
-
-                    {uScope === "class" && (
-                        <div>
-                            <label className="mb-1 block text-sm font-medium text-zinc-700">
-                                Chọn lớp
-                            </label>
-                            <select
-                                value={uClassId}
-                                onChange={(e) => setUClassId(e.target.value)}
-                                className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm"
-                                required
-                            >
-                                {classes.map((c) => (
-                                    <option key={c._id} value={c._id}>
-                                        {c.name} — {c.course?.name || ""}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-                    )}
 
                     <div>
                         <label className="mb-1 block text-sm font-medium text-zinc-700">
@@ -437,6 +526,68 @@ export default function Materials() {
                         className="w-full rounded-xl bg-zinc-900 px-4 py-3 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-60"
                     >
                         {uploading ? "Đang upload..." : "Upload"}
+                    </button>
+                </form>
+            </Modal>
+
+            {/* create folder modal */}
+            <Modal
+                open={openCreateFolder}
+                title="Tạo folder"
+                onClose={() => setOpenCreateFolder(false)}
+            >
+                <form onSubmit={onCreateFolder} className="space-y-3">
+                    <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-700">
+                        Tạo trong:{" "}
+                        <span className="font-semibold">
+                            {path.length
+                                ? path[path.length - 1].name
+                                : "Folder gốc"}
+                        </span>
+                    </div>
+
+                    <div>
+                        <label className="mb-1 block text-sm font-medium text-zinc-700">
+                            Tên folder
+                        </label>
+                        <input
+                            value={fName}
+                            onChange={(e) => setFName(e.target.value)}
+                            className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm"
+                            placeholder="VD: HSK 3 - Bài 1-10"
+                        />
+                    </div>
+
+                    <button className="w-full rounded-xl bg-zinc-900 px-4 py-3 text-sm font-semibold text-white hover:bg-zinc-800">
+                        Tạo folder
+                    </button>
+                </form>
+            </Modal>
+
+            {/* edit folder modal */}
+            <Modal
+                open={openEditFolder}
+                title="Sửa folder"
+                onClose={() => {
+                    setOpenEditFolder(false);
+                    setEditFolder(null);
+                }}
+            >
+                <form onSubmit={onSaveFolder} className="space-y-3">
+                    <div>
+                        <label className="mb-1 block text-sm font-medium text-zinc-700">
+                            Tên folder
+                        </label>
+                        <input
+                            value={efName}
+                            onChange={(e) => setEFName(e.target.value)}
+                            className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm"
+                            placeholder="Nhập tên mới..."
+                        />
+                    </div>
+
+                    <button className="w-full rounded-xl bg-zinc-900 px-4 py-3 text-sm font-semibold text-white hover:bg-zinc-800">
+                        Lưu
                     </button>
                 </form>
             </Modal>

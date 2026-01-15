@@ -6,20 +6,34 @@ async function parseJson(res) {
     return data;
 }
 
+function cleanParams(params = {}) {
+    const out = {};
+    Object.entries(params || {}).forEach(([k, v]) => {
+        if (v === undefined || v === null) return;
+        const s = String(v);
+        if (s === "" || s === "undefined" || s === "null") return;
+        out[k] = s;
+    });
+    return out;
+}
+
 export async function listMaterialsApi(token, params = {}) {
-    const qs = new URLSearchParams(params).toString();
+    const qs = new URLSearchParams(cleanParams(params)).toString();
     const res = await fetch(`${API_BASE}/api/materials${qs ? `?${qs}` : ""}`, {
         headers: { Authorization: `Bearer ${token}` },
     });
     return parseJson(res);
 }
 
-export async function uploadMaterialApi(token, { scope, courseId, classId, title, file }) {
+// ✅ NEW: upload chỉ cần title, file, folderId
+export async function uploadMaterialApi(token, { title, file, folderId } = {}) {
     const form = new FormData();
-    form.append("scope", scope || "class");
-    if (courseId) form.append("courseId", courseId);
-    if (classId) form.append("classId", classId);
     if (title) form.append("title", title);
+
+    // root: đừng append folderId để khỏi gửi "null"
+    if (folderId) form.append("folderId", folderId);
+
+    if (!file) throw new Error("file is required");
     form.append("file", file);
 
     const res = await fetch(`${API_BASE}/api/materials/upload`, {
@@ -51,7 +65,6 @@ export async function deleteMaterialApi(token, id) {
 }
 
 export async function openMaterialFile(token, id) {
-    // <a href> không gửi Authorization => phải fetch blob
     const res = await fetch(`${API_BASE}/api/materials/${id}/file`, {
         headers: { Authorization: `Bearer ${token}` },
     });

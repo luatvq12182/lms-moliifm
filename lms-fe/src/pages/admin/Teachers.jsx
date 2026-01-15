@@ -4,7 +4,9 @@ import {
     adminListUsersApi,
     adminCreateUserApi,
     adminUpdateUserApi,
+    adminUploadUserAvatarApi,
 } from "../../api/users";
+import { absUrl } from "../../utils/url";
 
 function Modal({ open, title, children, onClose }) {
     if (!open) return null;
@@ -27,13 +29,44 @@ function Modal({ open, title, children, onClose }) {
     );
 }
 
+function Avatar({ url, name, size = 36 }) {
+    const initials = (name || "?")
+        .trim()
+        .split(/\s+/)
+        .slice(-2)
+        .map((s) => s[0]?.toUpperCase())
+        .join("");
+
+    return (
+        <div
+            className="shrink-0 overflow-hidden rounded-full border border-zinc-200 bg-zinc-100"
+            style={{ width: size, height: size }}
+            title={name || ""}
+        >
+            {url ? (
+                <img
+                    src={url}
+                    alt="avatar"
+                    className="h-full w-full object-cover"
+                    onError={(e) => {
+                        e.currentTarget.style.display = "none";
+                    }}
+                />
+            ) : (
+                <div className="flex h-full w-full items-center justify-center text-xs font-semibold text-zinc-700">
+                    {initials || "?"}
+                </div>
+            )}
+        </div>
+    );
+}
+
 export default function Teachers() {
     const { token, user, logout } = useAuth();
 
     const [loading, setLoading] = useState(true);
     const [err, setErr] = useState("");
     const [q, setQ] = useState("");
-
     const [users, setUsers] = useState([]);
 
     const [openCreate, setOpenCreate] = useState(false);
@@ -45,12 +78,28 @@ export default function Teachers() {
     const [cEmail, setCEmail] = useState("");
     const [cPass, setCPass] = useState("");
     const [cRole, setCRole] = useState("teacher");
+    const [cAvatarFile, setCAvatarFile] = useState(null);
+    const [cAvatarPreview, setCAvatarPreview] = useState("");
 
     // form edit
     const [eName, setEName] = useState("");
     const [ePass, setEPass] = useState("");
     const [eRole, setERole] = useState("teacher");
     const [eActive, setEActive] = useState(true);
+    const [eAvatarFile, setEAvatarFile] = useState(null);
+    const [eAvatarPreview, setEAvatarPreview] = useState("");
+
+    function clearCreateAvatar() {
+        if (cAvatarPreview) URL.revokeObjectURL(cAvatarPreview);
+        setCAvatarFile(null);
+        setCAvatarPreview("");
+    }
+
+    function clearEditAvatar() {
+        if (eAvatarPreview) URL.revokeObjectURL(eAvatarPreview);
+        setEAvatarFile(null);
+        setEAvatarPreview("");
+    }
 
     async function refresh() {
         setErr("");
@@ -60,8 +109,7 @@ export default function Teachers() {
             setUsers(data.users || []);
         } catch (e) {
             setErr(e.message || "Load thất bại");
-            // token lỗi thì logout luôn cho chắc
-            if ((e.message || "").includes("token")) logout();
+            if ((e.message || "").toLowerCase().includes("token")) logout();
         } finally {
             setLoading(false);
         }
@@ -75,7 +123,7 @@ export default function Teachers() {
     const filtered = useMemo(() => {
         const keyword = q.trim().toLowerCase();
         return users
-            .filter((u) => u.role === "teacher") // trang này chỉ quản lý teacher
+            .filter((u) => u.role === "teacher")
             .filter((u) => {
                 if (!keyword) return true;
                 return (
@@ -91,24 +139,33 @@ export default function Teachers() {
         setEPass("");
         setERole(u.role || "teacher");
         setEActive(Boolean(u.isActive));
+        clearEditAvatar();
         setOpenEdit(true);
     }
 
     async function onCreate(e) {
         e.preventDefault();
         setErr("");
+
         try {
-            await adminCreateUserApi(token, {
+            const created = await adminCreateUserApi(token, {
                 name: cName,
                 email: cEmail,
                 password: cPass,
-                role: cRole, // teacher/admin (nhưng trang này default teacher)
+                role: cRole,
             });
+
+            // ✅ upload avatar (nếu có)
+            if (cAvatarFile && created?._id) {
+                await adminUploadUserAvatarApi(token, created._id, cAvatarFile);
+            }
+
             setOpenCreate(false);
             setCName("");
             setCEmail("");
             setCPass("");
             setCRole("teacher");
+            clearCreateAvatar();
             await refresh();
         } catch (e2) {
             setErr(e2.message || "Tạo tài khoản thất bại");
@@ -120,22 +177,66 @@ export default function Teachers() {
         if (!editUser?._id) return;
 
         setErr("");
+
         try {
             const payload = { name: eName, isActive: eActive, role: eRole };
             if (ePass.trim()) payload.password = ePass.trim();
 
             await adminUpdateUserApi(token, editUser._id, payload);
+
+            // ✅ upload avatar (nếu có)
+            if (eAvatarFile) {
+                await adminUploadUserAvatarApi(
+                    token,
+                    editUser._id,
+                    eAvatarFile
+                );
+            }
+
             setOpenEdit(false);
             setEditUser(null);
+            clearEditAvatar();
             await refresh();
         } catch (e2) {
             setErr(e2.message || "Cập nhật thất bại");
         }
     }
 
+    function onPickCreateAvatar(file) {
+        setErr("");
+        if (!file) return;
+        if (!file.type.startsWith("image/")) {
+            setErr("Avatar phải là ảnh (JPG/PNG/WEBP).");
+            return;
+        }
+        if (file.size > 3 * 1024 * 1024) {
+            setErr("Avatar tối đa 3MB.");
+            return;
+        }
+        clearCreateAvatar();
+        setCAvatarFile(file);
+        setCAvatarPreview(URL.createObjectURL(file));
+    }
+
+    function onPickEditAvatar(file) {
+        setErr("");
+        if (!file) return;
+        if (!file.type.startsWith("image/")) {
+            setErr("Avatar phải là ảnh (JPG/PNG/WEBP).");
+            return;
+        }
+        if (file.size > 3 * 1024 * 1024) {
+            setErr("Avatar tối đa 3MB.");
+            return;
+        }
+        clearEditAvatar();
+        setEAvatarFile(file);
+        setEAvatarPreview(URL.createObjectURL(file));
+    }
+
     if (user?.role !== "admin") {
         return (
-            <div className="rounded-2xl border border-zinc-200 bg-white p-6 ">
+            <div className="rounded-2xl border border-zinc-200 bg-white p-6">
                 <div className="text-sm font-semibold">
                     Khu vực dành cho quản trị viên.
                 </div>
@@ -193,17 +294,25 @@ export default function Teachers() {
                     filtered.map((u) => (
                         <div
                             key={u._id}
-                            className="rounded-2xl border border-zinc-200 bg-white p-4 "
+                            className="rounded-2xl border border-zinc-200 bg-white p-4"
                         >
                             <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                    <div className="truncate text-sm font-semibold">
-                                        {u.name}
-                                    </div>
-                                    <div className="mt-1 text-xs text-zinc-500">
-                                        {u.email}
+                                <div className="flex min-w-0 items-center gap-3">
+                                    <Avatar
+                                        url={absUrl(u.avatarUrl)}
+                                        name={u.name}
+                                        size={40}
+                                    />
+                                    <div className="min-w-0">
+                                        <div className="truncate text-sm font-semibold">
+                                            {u.name}
+                                        </div>
+                                        <div className="mt-1 text-xs text-zinc-500">
+                                            {u.email}
+                                        </div>
                                     </div>
                                 </div>
+
                                 <button
                                     onClick={() => openEditModal(u)}
                                     className="shrink-0 rounded-xl border border-zinc-200 px-3 py-2 text-xs hover:bg-zinc-50"
@@ -211,6 +320,7 @@ export default function Teachers() {
                                     Sửa
                                 </button>
                             </div>
+
                             <div className="mt-3 flex items-center justify-between">
                                 <div className="text-xs text-zinc-500">
                                     Trạng thái:{" "}
@@ -228,7 +338,7 @@ export default function Teachers() {
             </div>
 
             {/* desktop table */}
-            <div className="hidden overflow-hidden rounded-2xl border border-zinc-200 bg-white  md:block">
+            <div className="hidden overflow-hidden rounded-2xl border border-zinc-200 bg-white md:block">
                 <div className="grid grid-cols-12 border-b border-zinc-200 bg-zinc-50 px-4 py-3 text-xs font-semibold text-zinc-600">
                     <div className="col-span-4">Tên</div>
                     <div className="col-span-4">Email</div>
@@ -244,14 +354,25 @@ export default function Teachers() {
                             key={u._id}
                             className="grid grid-cols-12 items-center px-4 py-3 text-sm hover:bg-zinc-50"
                         >
-                            <div className="col-span-4 font-medium">
-                                {u.name}
+                            <div className="col-span-4 flex items-center gap-3 font-medium">
+                                <Avatar
+                                    url={absUrl(u.avatarUrl)}
+                                    name={u.name}
+                                    size={34}
+                                />
+                                <span className="truncate">{u.name}</span>
                             </div>
-                            <div className="col-span-4 text-zinc-700">
+                            <div className="col-span-4 truncate text-zinc-700">
                                 {u.email}
                             </div>
                             <div className="col-span-2">
-                                <span className={`rounded-full bg-zinc-100 px-3 py-1 text-xs text-zinc-700 border ${u.isActive ? "border-green-600" : "border-red-600"}`}>
+                                <span
+                                    className={`rounded-full bg-zinc-100 px-3 py-1 text-xs text-zinc-700 border ${
+                                        u.isActive
+                                            ? "border-green-600"
+                                            : "border-red-600"
+                                    }`}
+                                >
                                     {u.isActive ? "Hoạt động" : "Tạm khóa"}
                                 </span>
                             </div>
@@ -275,6 +396,47 @@ export default function Teachers() {
                 onClose={() => setOpenCreate(false)}
             >
                 <form onSubmit={onCreate} className="space-y-3">
+                    {/* avatar */}
+                    <div className="flex items-center gap-3">
+                        <Avatar
+                            url={cAvatarPreview || ""}
+                            name={cName}
+                            size={48}
+                        />
+                        <div className="min-w-0">
+                            <div className="text-sm font-medium text-zinc-700">
+                                Ảnh đại diện
+                            </div>
+                            <div className="mt-1 flex flex-wrap gap-2">
+                                <label className="cursor-pointer rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs hover:bg-zinc-50">
+                                    Chọn ảnh
+                                    <input
+                                        type="file"
+                                        accept="image/png,image/jpeg,image/webp"
+                                        className="hidden"
+                                        onChange={(e) =>
+                                            onPickCreateAvatar(
+                                                e.target.files?.[0]
+                                            )
+                                        }
+                                    />
+                                </label>
+                                {cAvatarFile && (
+                                    <button
+                                        type="button"
+                                        onClick={clearCreateAvatar}
+                                        className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs hover:bg-zinc-50"
+                                    >
+                                        Bỏ ảnh
+                                    </button>
+                                )}
+                            </div>
+                            <div className="mt-1 text-xs text-zinc-500">
+                                JPG/PNG/WEBP, tối đa 3MB
+                            </div>
+                        </div>
+                    </div>
+
                     <div>
                         <label className="mb-1 block text-sm font-medium text-zinc-700">
                             Họ tên
@@ -285,6 +447,7 @@ export default function Teachers() {
                             onChange={(e) => setCName(e.target.value)}
                         />
                     </div>
+
                     <div>
                         <label className="mb-1 block text-sm font-medium text-zinc-700">
                             Email
@@ -295,6 +458,7 @@ export default function Teachers() {
                             onChange={(e) => setCEmail(e.target.value)}
                         />
                     </div>
+
                     <div>
                         <label className="mb-1 block text-sm font-medium text-zinc-700">
                             Mật khẩu
@@ -307,7 +471,6 @@ export default function Teachers() {
                         />
                     </div>
 
-                    {/* tạm cho chọn role nếu bạn muốn tạo admin luôn */}
                     <div>
                         <label className="mb-1 block text-sm font-medium text-zinc-700">
                             Vai trò
@@ -335,6 +498,47 @@ export default function Teachers() {
                 onClose={() => setOpenEdit(false)}
             >
                 <form onSubmit={onUpdate} className="space-y-3">
+                    {/* avatar */}
+                    <div className="flex items-center gap-3">
+                        <Avatar
+                            url={eAvatarPreview || absUrl(editUser?.avatarUrl) || ""}
+                            name={eName}
+                            size={48}
+                        />
+                        <div className="min-w-0">
+                            <div className="text-sm font-medium text-zinc-700">
+                                Ảnh đại diện
+                            </div>
+                            <div className="mt-1 flex flex-wrap gap-2">
+                                <label className="cursor-pointer rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs hover:bg-zinc-50">
+                                    Chọn ảnh mới
+                                    <input
+                                        type="file"
+                                        accept="image/png,image/jpeg,image/webp"
+                                        className="hidden"
+                                        onChange={(e) =>
+                                            onPickEditAvatar(
+                                                e.target.files?.[0]
+                                            )
+                                        }
+                                    />
+                                </label>
+                                {eAvatarFile && (
+                                    <button
+                                        type="button"
+                                        onClick={clearEditAvatar}
+                                        className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs hover:bg-zinc-50"
+                                    >
+                                        Bỏ ảnh mới
+                                    </button>
+                                )}
+                            </div>
+                            <div className="mt-1 text-xs text-zinc-500">
+                                JPG/PNG/WEBP, tối đa 3MB
+                            </div>
+                        </div>
+                    </div>
+
                     <div>
                         <label className="mb-1 block text-sm font-medium text-zinc-700">
                             Họ tên

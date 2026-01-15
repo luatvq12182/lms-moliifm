@@ -24,7 +24,7 @@ export default function Login() {
 
             // admin vào /admin, teacher vào /account
             if (data.user?.role === "admin")
-                navigate("/admin", { replace: true });
+                navigate("/admin/profile", { replace: true });
             else navigate("/account", { replace: true });
         } catch (err) {
             setError(err.message || "Đăng nhập thất bại");
