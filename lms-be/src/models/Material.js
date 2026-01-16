@@ -12,6 +12,8 @@ const MaterialSchema = new mongoose.Schema(
 
         // ✅ folder ảo
         folderId: { type: mongoose.Schema.Types.ObjectId, ref: "Folder", default: null },
+        visibility: { type: String, enum: ["public", "restricted"], default: "public" },
+        allowTeacherIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
 
         google: {
             fileId: { type: String, default: null },

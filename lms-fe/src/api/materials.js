@@ -25,18 +25,35 @@ export async function listMaterialsApi(token, params = {}) {
     return parseJson(res);
 }
 
-// ✅ NEW: upload chỉ cần title, file, folderId
-export async function uploadMaterialApi(token, { title, file, folderId } = {}) {
+export async function uploadMaterialApi(token, { title, file, folderId, visibility, allowTeacherIds }) {
     const form = new FormData();
     if (title) form.append("title", title);
-
-    // root: đừng append folderId để khỏi gửi "null"
     if (folderId) form.append("folderId", folderId);
 
-    if (!file) throw new Error("file is required");
+    if (visibility) form.append("visibility", visibility); // optional (nếu BE cho override)
+    if (Array.isArray(allowTeacherIds)) {
+        allowTeacherIds.forEach((id) => form.append("allowTeacherIds[]", id));
+    }
+
     form.append("file", file);
 
     const res = await fetch(`${API_BASE}/api/materials/upload`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: form,
+    });
+    return parseJson(res);
+}
+
+export async function uploadManyMaterialsApi(token, { folderId, files, titles }) {
+    const form = new FormData();
+    if (folderId) form.append("folderId", folderId);
+    // titles gửi 1 cục json theo thứ tự file
+    form.append("titles", JSON.stringify(titles || []));
+
+    (files || []).forEach((f) => form.append("files", f));
+
+    const res = await fetch(`${API_BASE}/api/materials/upload-many`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
         body: form,
@@ -80,6 +97,18 @@ export async function openMaterialFile(token, id) {
 export async function getMaterialEmbedApi(token, id) {
     const res = await fetch(`${API_BASE}/api/materials/${id}/embed`, {
         headers: { Authorization: `Bearer ${token}` },
+    });
+    return parseJson(res);
+}
+
+export async function patchMaterialPermissionsApi(token, id, payload) {
+    const res = await fetch(`${API_BASE}/api/materials/${id}/permissions`, {
+        method: "PATCH",
+        headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
     });
     return parseJson(res);
 }

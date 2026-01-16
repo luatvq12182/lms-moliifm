@@ -4,6 +4,9 @@ import {
     listMaterialsApi,
     uploadMaterialApi,
     deleteMaterialApi,
+    // patchMaterialApi,
+    patchMaterialPermissionsApi,
+    patchMaterialApi,
 } from "../../api/materials";
 import {
     listFoldersApi,
@@ -12,6 +15,9 @@ import {
     updateFolderApi,
     deleteFolderApi,
 } from "../../api/folders";
+import { adminListUsersApi } from "../../api/users"; // ✅ dùng để lấy list teacher cho admin
+import { absUrl } from "../../utils/url";
+import UploadMaterialsModal from "../../components/UploadMaterialsModal.jsx";
 
 function pickIcon(name = "", mime = "") {
     const n = (name || "").toLowerCase();
@@ -92,6 +98,148 @@ function DriveCrumb({ path, onGoRoot, onGo }) {
     );
 }
 
+// ✅ UI select quyền
+function AccessEditor({
+    teachers,
+    visibility,
+    setVisibility,
+    allowIds,
+    setAllowIds,
+}) {
+    const isRestricted = visibility === "restricted";
+    const [kw, setKw] = useState("");
+
+    const filtered = useMemo(() => {
+        const k = kw.trim().toLowerCase();
+        if (!k) return teachers;
+        return teachers.filter((t) => {
+            const name = String(t.name || "").toLowerCase();
+            const email = String(t.email || "").toLowerCase();
+            return name.includes(k) || email.includes(k);
+        });
+    }, [teachers, kw]);
+
+    function toggle(id) {
+        setAllowIds((prev) => {
+            const s = new Set(prev);
+            if (s.has(id)) s.delete(id);
+            else s.add(id);
+            return Array.from(s);
+        });
+    }
+
+    function getAvatarUrl(t) {
+        // tuỳ BE bạn trả field nào: avatarUrl | avatar | avatarPath...
+        const u = t.avatarUrl || t.avatar || t.avatarPath || "";
+        return u ? absUrl(u) : "";
+    }
+
+    function letterOf(t) {
+        const x = String(t.name || t.email || "A")
+            .trim()
+            .slice(0, 1)
+            .toUpperCase();
+        return x || "A";
+    }
+
+    return (
+        <div className="space-y-3">
+            <div>
+                <label className="mb-1 block text-sm font-medium text-zinc-700">
+                    Quyền truy cập
+                </label>
+                <select
+                    value={visibility}
+                    onChange={(e) => setVisibility(e.target.value)}
+                    className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm"
+                >
+                    <option value="public">Công khai (mọi giảng viên)</option>
+                    <option value="restricted">Giới hạn theo giảng viên</option>
+                </select>
+            </div>
+
+            {isRestricted && (
+                <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+                    <div className="mb-2 text-xs font-semibold text-zinc-600">
+                        Chọn giảng viên được phép xem
+                    </div>
+
+                    {/* ✅ search */}
+                    <div className="mb-2">
+                        <input
+                            value={kw}
+                            onChange={(e) => setKw(e.target.value)}
+                            placeholder="Tìm theo tên hoặc email..."
+                            className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm"
+                        />
+                        <div className="mt-1 text-xs text-zinc-500">
+                            {filtered.length}/{teachers.length} kết quả
+                        </div>
+                    </div>
+
+                    {teachers.length === 0 ? (
+                        <div className="text-sm text-zinc-500">
+                            Chưa có giảng viên.
+                        </div>
+                    ) : filtered.length === 0 ? (
+                        <div className="text-sm text-zinc-500">
+                            Không tìm thấy giảng viên phù hợp.
+                        </div>
+                    ) : (
+                        <div className="max-h-[300px] overflow-auto space-y-1">
+                            {filtered.map((t) => {
+                                const avatar = getAvatarUrl(t);
+                                const checked = allowIds.includes(t._id);
+                                return (
+                                    <label
+                                        key={t._id}
+                                        className="flex items-center gap-3 rounded-xl bg-white px-3 py-2 text-sm hover:bg-zinc-50"
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            checked={checked}
+                                            onChange={() => toggle(t._id)}
+                                        />
+
+                                        {/* ✅ avatar */}
+                                        <div className="h-9 w-9 overflow-hidden rounded-xl border border-zinc-200 bg-zinc-100">
+                                            {avatar ? (
+                                                <img
+                                                    src={avatar}
+                                                    alt="avatar"
+                                                    className="h-full w-full object-cover"
+                                                />
+                                            ) : (
+                                                <div className="grid h-full w-full place-items-center text-sm font-semibold text-zinc-700">
+                                                    {letterOf(t)}
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        <div className="min-w-0 flex-1">
+                                            <div className="truncate font-medium text-zinc-900">
+                                                {t.name || "—"}
+                                            </div>
+                                            <div className="truncate text-xs text-zinc-500">
+                                                {t.email}
+                                            </div>
+                                        </div>
+                                    </label>
+                                );
+                            })}
+                        </div>
+                    )}
+
+                    <div className="mt-2 text-xs text-zinc-500">
+                        * Những người không được chọn sẽ không nhìn thấy
+                        folder/file này.
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
 export default function Materials() {
     const { token, user } = useAuth();
 
@@ -101,23 +249,39 @@ export default function Materials() {
     const [folders, setFolders] = useState([]);
     const [materials, setMaterials] = useState([]);
 
+    // teachers (admin only)
+    const [teachers, setTeachers] = useState([]);
+
     // search
     const [q, setQ] = useState("");
+    const [emTitle, setEMTitle] = useState("");
 
     // upload
     const [openUpload, setOpenUpload] = useState(false);
     const [uTitle, setUTitle] = useState("");
     const [uFile, setUFile] = useState(null);
+    const [uVisibility, setUVisibility] = useState("public");
+    const [uAllowIds, setUAllowIds] = useState([]);
     const [uploading, setUploading] = useState(false);
 
     // create folder
     const [openCreateFolder, setOpenCreateFolder] = useState(false);
     const [fName, setFName] = useState("");
+    const [fVisibility, setFVisibility] = useState("public");
+    const [fAllowIds, setFAllowIds] = useState([]);
 
     // edit folder
     const [openEditFolder, setOpenEditFolder] = useState(false);
     const [editFolder, setEditFolder] = useState(null);
     const [efName, setEFName] = useState("");
+    const [efVisibility, setEFVisibility] = useState("public");
+    const [efAllowIds, setEFAllowIds] = useState([]);
+
+    // edit material permissions
+    const [openEditMaterial, setOpenEditMaterial] = useState(false);
+    const [editMaterial, setEditMaterial] = useState(null);
+    const [emVisibility, setEMVisibility] = useState("public");
+    const [emAllowIds, setEMAllowIds] = useState([]);
 
     const [loading, setLoading] = useState(true);
     const [err, setErr] = useState("");
@@ -137,7 +301,7 @@ export default function Materials() {
             setPath(pa.path || []);
 
             const m = await listMaterialsApi(token, {
-                folderId: nextFolderId || "", // "" => root
+                folderId: nextFolderId || "", // root = ""
                 q: nextQ.trim() ? nextQ.trim() : undefined,
             });
             setMaterials(m.items || []);
@@ -148,9 +312,30 @@ export default function Materials() {
         }
     }
 
+    async function init() {
+        setLoading(true);
+        setErr("");
+        try {
+            // load teachers for admin to assign permissions
+            if (user?.role === "admin") {
+                const u = await adminListUsersApi(token);
+                const arr = (u.users || []).filter(
+                    (x) => x.role === "teacher" && x.isActive
+                );
+                setTeachers(arr);
+            }
+
+            setFolderId("");
+            await refreshDrive("", "");
+        } catch (e) {
+            setErr(e.message || "Load thất bại");
+        } finally {
+            setLoading(false);
+        }
+    }
+
     useEffect(() => {
-        setFolderId("");
-        refreshDrive("", "");
+        init();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
@@ -168,17 +353,14 @@ export default function Materials() {
         setFolderId(id);
         await refreshDrive(id, q);
     }
-
     async function onGoRoot() {
         setFolderId("");
         await refreshDrive("", q);
     }
-
     async function onGoCrumb(id) {
         setFolderId(id);
         await refreshDrive(id, q);
     }
-
     async function onRefresh() {
         await refreshDrive(folderId, q);
     }
@@ -193,12 +375,17 @@ export default function Materials() {
             await uploadMaterialApi(token, {
                 title: uTitle,
                 file: uFile,
-                folderId: folderId || null, // root => null
+                folderId: folderId || null,
+                // ✅ quyền upload (tuỳ BE: kế thừa folder hoặc override)
+                visibility: uVisibility,
+                allowTeacherIds: uVisibility === "restricted" ? uAllowIds : [],
             });
 
             setOpenUpload(false);
             setUTitle("");
             setUFile(null);
+            setUVisibility("public");
+            setUAllowIds([]);
 
             await refreshDrive(folderId, q);
         } catch (e2) {
@@ -230,10 +417,15 @@ export default function Materials() {
             await createFolderApi(token, {
                 name: fName.trim(),
                 parentId: folderId || null,
+                // ✅ quyền folder
+                visibility: fVisibility,
+                allowTeacherIds: fVisibility === "restricted" ? fAllowIds : [],
             });
 
             setOpenCreateFolder(false);
             setFName("");
+            setFVisibility("public");
+            setFAllowIds([]);
             await refreshDrive(folderId, q);
         } catch (e2) {
             setErr(e2.message || "Tạo folder thất bại");
@@ -261,6 +453,12 @@ export default function Materials() {
     function openEditFolderModal(f) {
         setEditFolder(f);
         setEFName(f?.name || "");
+        setEFVisibility(f?.visibility || "public");
+        setEFAllowIds(
+            Array.isArray(f?.allowTeacherIds)
+                ? f.allowTeacherIds.map(String)
+                : []
+        );
         setOpenEditFolder(true);
     }
 
@@ -273,14 +471,72 @@ export default function Materials() {
         try {
             await updateFolderApi(token, editFolder._id, {
                 name: efName.trim(),
+                visibility: efVisibility,
+                allowTeacherIds:
+                    efVisibility === "restricted" ? efAllowIds : [],
             });
+
             setOpenEditFolder(false);
             setEditFolder(null);
             setEFName("");
+            setEFVisibility("public");
+            setEFAllowIds([]);
             await refreshDrive(folderId, q);
         } catch (e2) {
             setErr(e2.message || "Cập nhật folder thất bại");
         }
+    }
+
+    function openEditMaterialModal(m) {
+        setEditMaterial(m);
+        setEMTitle(m?.title || ""); // ✅ thêm dòng này
+        setEMVisibility(m?.visibility || "public");
+        setEMAllowIds(
+            Array.isArray(m?.allowTeacherIds)
+                ? m.allowTeacherIds.map(String)
+                : []
+        );
+        setOpenEditMaterial(true);
+    }
+
+    async function onSaveMaterial(e) {
+        e.preventDefault();
+        if (!editMaterial?._id) return;
+
+        const newTitle = (emTitle || "").trim();
+        if (!newTitle) return setErr("Bạn chưa nhập tên tài liệu");
+
+        setErr("");
+        try {
+            // 1) update title nếu có thay đổi
+            if (newTitle !== (editMaterial.title || "").trim()) {
+                await patchMaterialApi(token, editMaterial._id, {
+                    title: newTitle,
+                });
+            }
+
+            // 2) update permissions
+            await patchMaterialPermissionsApi(token, editMaterial._id, {
+                visibility: emVisibility,
+                allowTeacherIds:
+                    emVisibility === "restricted" ? emAllowIds : [],
+            });
+
+            setOpenEditMaterial(false);
+            setEditMaterial(null);
+            setEMTitle("");
+            setEMVisibility("public");
+            setEMAllowIds([]);
+
+            await refreshDrive(folderId, q);
+        } catch (e2) {
+            setErr(e2.message || "Cập nhật tài liệu thất bại");
+        }
+    }
+
+    function badgeVisibility(v) {
+        if (v === "restricted") return "Giới hạn";
+        return "Công khai";
     }
 
     return (
@@ -289,6 +545,11 @@ export default function Materials() {
                 <div>
                     <div className="text-base font-semibold">
                         Tài liệu / Slide
+                    </div>
+                    <div className="text-sm text-zinc-500">
+                        {user?.role === "admin"
+                            ? "Admin quản lý folder/file và phân quyền theo giảng viên."
+                            : "Bạn chỉ nhìn thấy folder/file được cấp quyền."}
                     </div>
                 </div>
 
@@ -343,7 +604,7 @@ export default function Materials() {
             <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white">
                 <div className="grid grid-cols-12 border-b border-zinc-200 bg-zinc-50 px-4 py-3 text-xs font-semibold text-zinc-600">
                     <div className="col-span-7">Tên</div>
-                    <div className="col-span-2">Loại</div>
+                    <div className="col-span-2">Quyền</div>
                     <div className="col-span-3 text-right">Thao tác</div>
                 </div>
 
@@ -378,8 +639,10 @@ export default function Materials() {
                                     </button>
                                 </div>
 
-                                <div className="col-span-2 text-xs text-zinc-600">
-                                    Folder
+                                <div className="col-span-2">
+                                    <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs text-zinc-700">
+                                        {badgeVisibility(f.visibility)}
+                                    </span>
                                 </div>
 
                                 <div className="col-span-3 text-right">
@@ -390,7 +653,7 @@ export default function Materials() {
                                                     openEditFolderModal(f)
                                                 }
                                                 className="rounded-lg border border-zinc-200 bg-white px-3 py-1 text-xs hover:bg-zinc-50"
-                                                title="Sửa tên folder"
+                                                title="Sửa folder + phân quyền"
                                             >
                                                 Sửa
                                             </button>
@@ -406,9 +669,7 @@ export default function Materials() {
                                             </button>
                                         </div>
                                     ) : (
-                                        <span className="text-xs text-zinc-400">
-                                            {" "}
-                                        </span>
+                                        <span className="text-xs text-zinc-400" />
                                     )}
                                 </div>
                             </div>
@@ -445,8 +706,10 @@ export default function Materials() {
                                         </div>
                                     </div>
 
-                                    <div className="col-span-2 text-xs text-zinc-600">
-                                        File
+                                    <div className="col-span-2">
+                                        <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs text-zinc-700">
+                                            {badgeVisibility(m.visibility)}
+                                        </span>
                                     </div>
 
                                     <div className="col-span-3 text-right">
@@ -457,20 +720,31 @@ export default function Materials() {
                                             >
                                                 Xem
                                             </a>
-                                            {user?.role === "admin" ? (
-                                                <button
-                                                    onClick={() =>
-                                                        onDeleteMaterial(m)
-                                                    }
-                                                    className="rounded-lg border border-red-200 bg-red-50 px-3 py-1 text-xs text-red-700 hover:bg-red-100"
-                                                    title="Xoá"
-                                                >
-                                                    Xoá
-                                                </button>
-                                            ) : (
-                                                <span className="text-xs text-zinc-400">
-                                                    {" "}
-                                                </span>
+
+                                            {user?.role === "admin" && (
+                                                <>
+                                                    <button
+                                                        onClick={() =>
+                                                            openEditMaterialModal(
+                                                                m
+                                                            )
+                                                        }
+                                                        className="rounded-lg border border-zinc-200 bg-white px-3 py-1 text-xs hover:bg-zinc-50"
+                                                        title="Sửa phân quyền tài liệu"
+                                                    >
+                                                        Sửa
+                                                    </button>
+
+                                                    <button
+                                                        onClick={() =>
+                                                            onDeleteMaterial(m)
+                                                        }
+                                                        className="rounded-lg border border-red-200 bg-red-50 px-3 py-1 text-xs text-red-700 hover:bg-red-100"
+                                                        title="Xoá"
+                                                    >
+                                                        Xoá
+                                                    </button>
+                                                </>
                                             )}
                                         </div>
                                     </div>
@@ -481,54 +755,33 @@ export default function Materials() {
                 )}
             </div>
 
-            {/* upload modal */}
-            <Modal
+            <UploadMaterialsModal
                 open={openUpload}
-                title="Upload tài liệu"
                 onClose={() => setOpenUpload(false)}
-            >
-                <form onSubmit={onUpload} className="space-y-3">
-                    <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-700">
-                        Upload vào:{" "}
-                        <span className="font-semibold">
-                            {path.length ? path[path.length - 1].name : "Root"}
-                        </span>
-                    </div>
-
-                    <div>
-                        <label className="mb-1 block text-sm font-medium text-zinc-700">
-                            Tên hiển thị (tuỳ chọn)
-                        </label>
-                        <input
-                            value={uTitle}
-                            onChange={(e) => setUTitle(e.target.value)}
-                            placeholder="VD: Bài 12 - HSK3"
-                            className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm"
-                        />
-                    </div>
-
-                    <div>
-                        <label className="mb-1 block text-sm font-medium text-zinc-700">
-                            File
-                        </label>
-                        <input
-                            type="file"
-                            onChange={(e) =>
-                                setUFile(e.target.files?.[0] || null)
-                            }
-                            className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm"
-                            required
-                        />
-                    </div>
-
-                    <button
-                        disabled={uploading}
-                        className="w-full rounded-xl bg-zinc-900 px-4 py-3 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-60"
-                    >
-                        {uploading ? "Đang upload..." : "Upload"}
-                    </button>
-                </form>
-            </Modal>
+                folderId={folderId}
+                path={path}
+                isAdmin={user?.role === "admin"}
+                teachers={teachers}
+                absUrl={absUrl}
+                uploadOne={async ({
+                    folderId,
+                    visibility,
+                    allowTeacherIds,
+                    file,
+                    title,
+                }) => {
+                    await uploadMaterialApi(token, {
+                        folderId,
+                        visibility,
+                        allowTeacherIds,
+                        file,
+                        title,
+                    });
+                }}
+                onUploadedDone={async () => {
+                    await refreshDrive(folderId || "", q);
+                }}
+            />
 
             {/* create folder modal */}
             <Modal
@@ -544,6 +797,9 @@ export default function Materials() {
                                 ? path[path.length - 1].name
                                 : "Folder gốc"}
                         </span>
+                        <div className="mt-1 text-xs text-zinc-500">
+                            Folder con có thể kế thừa quyền truy cập folder cha
+                        </div>
                     </div>
 
                     <div>
@@ -557,6 +813,16 @@ export default function Materials() {
                             placeholder="VD: HSK 3 - Bài 1-10"
                         />
                     </div>
+
+                    {user?.role === "admin" && (
+                        <AccessEditor
+                            teachers={teachers}
+                            visibility={fVisibility}
+                            setVisibility={setFVisibility}
+                            allowIds={fAllowIds}
+                            setAllowIds={setFAllowIds}
+                        />
+                    )}
 
                     <button className="w-full rounded-xl bg-zinc-900 px-4 py-3 text-sm font-semibold text-white hover:bg-zinc-800">
                         Tạo folder
@@ -586,8 +852,60 @@ export default function Materials() {
                         />
                     </div>
 
+                    {user?.role === "admin" && (
+                        <AccessEditor
+                            teachers={teachers}
+                            visibility={efVisibility}
+                            setVisibility={setEFVisibility}
+                            allowIds={efAllowIds}
+                            setAllowIds={setEFAllowIds}
+                        />
+                    )}
+
                     <button className="w-full rounded-xl bg-zinc-900 px-4 py-3 text-sm font-semibold text-white hover:bg-zinc-800">
                         Lưu
+                    </button>
+                </form>
+            </Modal>
+
+            {/* edit material permission modal */}
+            <Modal
+                open={openEditMaterial}
+                title="Phân quyền tài liệu"
+                onClose={() => {
+                    setOpenEditMaterial(false);
+                    setEditMaterial(null);
+                }}
+            >
+                <form onSubmit={onSaveMaterial} className="space-y-3">
+                    <div>
+                        <label className="mb-1 block text-sm font-medium text-zinc-700">
+                            Tên tài liệu
+                        </label>
+                        <input
+                            value={emTitle}
+                            onChange={(e) => setEMTitle(e.target.value)}
+                            className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm"
+                            placeholder="Nhập tên hiển thị..."
+                            required
+                        />
+                        <div className="mt-1 text-xs text-zinc-500">
+                            Tên gốc file: {editMaterial?.originalName || "—"}
+                        </div>
+                    </div>
+
+                    {user?.role === "admin" && (
+                        <AccessEditor
+                            teachers={teachers}
+                            visibility={emVisibility}
+                            setVisibility={setEMVisibility}
+                            allowIds={emAllowIds}
+                            setAllowIds={setEMAllowIds}
+                        />
+                    )}
+
+                    <button className="w-full rounded-xl bg-zinc-900 px-4 py-3 text-sm font-semibold text-white hover:bg-zinc-800">
+                        Lưu quyền
                     </button>
                 </form>
             </Modal>

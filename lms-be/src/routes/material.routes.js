@@ -10,8 +10,15 @@ router.get("/", ctrl.listMaterials);
 
 // ✅ upload admin-only
 router.post("/upload", requireRole("admin"), uploadMaterial.single("file"), ctrl.uploadMaterial);
+router.post(
+    "/upload-many",
+    requireRole("admin"),
+    uploadMaterial.array("files", 50), // cho phép tối đa 50 file / lần
+    ctrl.uploadManyMaterials
+);
 
 router.patch("/:id", requireRole("admin"), ctrl.updateMaterial);
+router.patch("/:id/permissions", auth, ctrl.patchMaterialPermissions);
 router.delete("/:id", requireRole("admin"), ctrl.deleteMaterial);
 
 router.get("/:id/file", ctrl.downloadFile);

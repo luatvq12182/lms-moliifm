@@ -4,6 +4,9 @@ const FolderSchema = new mongoose.Schema(
     {
         name: { type: String, required: true, trim: true },
         parentId: { type: mongoose.Schema.Types.ObjectId, ref: "Folder", default: null },
+        visibility: { type: String, enum: ["public", "restricted"], default: "public" },
+        // chỉ dùng khi restricted
+        allowTeacherIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
         isActive: { type: Boolean, default: true },
         createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     },

@@ -1,7 +1,28 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import { getMaterialEmbedApi } from "../api/materials";
+
+function toSlidesMinimalEmbed(u = "") {
+    if (!u) return "";
+
+    // trường hợp BE trả fileId luôn (nếu sau này bạn đổi API)
+    if (/^[a-zA-Z0-9_-]{10,}$/.test(u)) {
+        return `https://docs.google.com/presentation/d/${u}/embed?start=false&loop=false&delayms=3000&rm=minimal`;
+    }
+
+    // nếu là link docs.google.com/presentation/...
+    if (u.includes("docs.google.com/presentation")) {
+        const m = u.match(/\/presentation\/d\/([^/]+)/);
+        const id = m?.[1];
+        if (id) {
+            return `https://docs.google.com/presentation/d/${id}/embed?start=false&loop=false&delayms=3000&rm=minimal`;
+        }
+    }
+
+    // fallback: giữ nguyên
+    return u;
+}
 
 export default function SlideViewer() {
     const { id } = useParams();
@@ -12,13 +33,17 @@ export default function SlideViewer() {
     const [err, setErr] = useState("");
     const [loading, setLoading] = useState(true);
 
+    const containerRef = useRef(null);
+    const [isFullscreen, setIsFullscreen] = useState(false);
+
     useEffect(() => {
         (async () => {
             setErr("");
             setLoading(true);
             try {
                 const data = await getMaterialEmbedApi(token, id);
-                setUrl(data.previewUrl || "");
+                const raw = data.previewUrl || "";
+                setUrl(toSlidesMinimalEmbed(raw));
             } catch (e) {
                 setErr(e.message || "Không mở được slide");
             } finally {
@@ -27,8 +52,30 @@ export default function SlideViewer() {
         })();
     }, [id, token]);
 
+    const toggleFullscreen = () => {
+        const el = containerRef.current;
+        if (!el) return;
+
+        if (!document.fullscreenElement) {
+            el.requestFullscreen?.();
+            setIsFullscreen(true);
+        } else {
+            document.exitFullscreen?.();
+            setIsFullscreen(false);
+        }
+    };
+
+    useEffect(() => {
+        const onFsChange = () => {
+            setIsFullscreen(!!document.fullscreenElement);
+        };
+        document.addEventListener("fullscreenchange", onFsChange);
+        return () =>
+            document.removeEventListener("fullscreenchange", onFsChange);
+    }, []);
+
     return (
-        <div className="h-screen w-screen bg-black">
+        <div ref={containerRef} className="h-screen w-screen bg-black">
             <div className="flex items-center justify-between px-3 py-2 text-white">
                 <button
                     onClick={() => nav(-1)}
@@ -37,7 +84,14 @@ export default function SlideViewer() {
                     ← Quay lại
                 </button>
                 <div className="text-sm text-white/80">Trình chiếu</div>
-                <div className="w-[80px]" />
+
+                <button
+                    onClick={toggleFullscreen}
+                    className="rounded-lg bg-white/10 px-3 py-1.5 text-sm hover:bg-white/15"
+                    title="Toàn màn hình"
+                >
+                    {isFullscreen ? "⤢ Thu nhỏ" : "⛶ Toàn màn hình"}
+                </button>
             </div>
 
             <div className="h-[calc(100vh-48px)] w-full">

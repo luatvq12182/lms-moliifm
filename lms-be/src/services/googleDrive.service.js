@@ -1,3 +1,4 @@
+const fs = require("fs");
 const { google } = require("googleapis");
 
 function getOAuthClient() {
@@ -14,6 +15,58 @@ function getOAuthClient() {
 
     oauth2Client.setCredentials({ refresh_token: GOOGLE_REFRESH_TOKEN });
     return oauth2Client;
+}
+
+function getDrive() {
+    const auth = getOAuthClient();
+    return google.drive({ version: "v3", auth });
+}
+
+async function uploadDocxAsGoogleDocs({ localPath, fileName }) {
+    const drive = getDrive();
+
+    // 1) upload docx lên drive (file tạm)
+    const uploaded = await drive.files.create({
+        requestBody: {
+            name: fileName,
+            mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        },
+        media: {
+            mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            body: fs.createReadStream(localPath),
+        },
+        fields: "id",
+    });
+
+    const sourceId = uploaded.data.id;
+    if (!sourceId) throw new Error("upload failed: missing source file id");
+
+    // 2) convert: copy sang google docs
+    const converted = await drive.files.copy({
+        fileId: sourceId,
+        requestBody: {
+            name: fileName,
+            mimeType: "application/vnd.google-apps.document",
+        },
+        fields: "id, webViewLink",
+    });
+
+    const fileId = converted.data.id;
+    if (!fileId) throw new Error("convert failed: missing converted file id");
+
+    // 3) dọn file tạm (docx source) để đỡ rác
+    try {
+        await drive.files.delete({ fileId: sourceId });
+    } catch (e) {
+        // không critical
+        console.warn("delete temp docx failed:", e?.message || e);
+    }
+
+    // 4) previewUrl để embed
+    const previewUrl = `https://docs.google.com/document/d/${fileId}/preview`;
+    const webViewLink = converted.data.webViewLink || "";
+
+    return { fileId, previewUrl, webViewLink };
 }
 
 async function uploadPptxAsGoogleSlides({ localPath, fileName }) {
@@ -68,6 +121,7 @@ async function setPermissionDomainReader(fileId, domain) {
 
 module.exports = {
     uploadPptxAsGoogleSlides,
+    uploadDocxAsGoogleDocs,
     setPermissionAnyoneReader,
     setPermissionDomainReader,
 };
