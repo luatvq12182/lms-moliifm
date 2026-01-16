@@ -715,6 +715,7 @@ export default function Materials() {
                                     <div className="col-span-3 text-right">
                                         <div className="flex justify-end gap-2">
                                             <a
+                                                target="_blank"
                                                 href={`/viewer/${m._id}`}
                                                 className="rounded-lg border border-zinc-200 px-3 py-1 text-xs hover:bg-white"
                                             >

@@ -76,15 +76,7 @@ export default function SlideViewer() {
 
     return (
         <div ref={containerRef} className="h-screen w-screen bg-black">
-            <div className="flex items-center justify-between px-3 py-2 text-white">
-                <button
-                    onClick={() => nav(-1)}
-                    className="rounded-lg bg-white/10 px-3 py-1.5 text-sm hover:bg-white/15"
-                >
-                    ← Quay lại
-                </button>
-                <div className="text-sm text-white/80">Trình chiếu</div>
-
+            <div className="flex items-center justify-end px-3 py-2 text-white">
                 <button
                     onClick={toggleFullscreen}
                     className="rounded-lg bg-white/10 px-3 py-1.5 text-sm hover:bg-white/15"
