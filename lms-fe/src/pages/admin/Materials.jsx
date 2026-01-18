@@ -7,6 +7,8 @@ import {
     // patchMaterialApi,
     patchMaterialPermissionsApi,
     patchMaterialApi,
+    // getMaterialEmbedApi,
+    getAudioBlobUrl,
 } from "../../api/materials";
 import {
     listFoldersApi,
@@ -18,6 +20,7 @@ import {
 import { adminListUsersApi } from "../../api/users"; // ✅ dùng để lấy list teacher cho admin
 import { absUrl } from "../../utils/url";
 import UploadMaterialsModal from "../../components/UploadMaterialsModal.jsx";
+import MediaPlayerModal from "../../components/MediaPlayerModal.jsx";
 
 function pickIcon(name = "", mime = "") {
     const n = (name || "").toLowerCase();
@@ -25,14 +28,21 @@ function pickIcon(name = "", mime = "") {
     const isDoc = n.endsWith(".doc") || n.endsWith(".docx");
     const isPdf = n.endsWith(".pdf");
     const isXls = n.endsWith(".xls") || n.endsWith(".xlsx");
+    const isAudio =
+        n.endsWith(".mp3") || n.endsWith(".wav") || n.endsWith(".m4a");
+    const isVideo =
+        (mime || "").startsWith("video/") ||
+        [".mp4"].some((x) => n.endsWith(x));
 
     if (isPpt) return { label: "P", cls: "bg-amber-400" };
+    if (isAudio) return { label: "♫", cls: "bg-purple-500" };
+    if (isVideo) return { label: "🎬", cls: "bg-fuchsia-500" };
     if (isDoc) return { label: "W", cls: "bg-blue-500" };
     if (isPdf) return { label: "PDF", cls: "bg-red-500" };
     if (isXls) return { label: "X", cls: "bg-emerald-500" };
     if ((mime || "").startsWith("image/"))
         return { label: "IMG", cls: "bg-zinc-500" };
-    return { label: "F", cls: "bg-zinc-400" };
+    return { label: "📄", cls: "bg-zinc-400" };
 }
 
 function fmtSize(bytes = 0) {
@@ -258,11 +268,6 @@ export default function Materials() {
 
     // upload
     const [openUpload, setOpenUpload] = useState(false);
-    const [uTitle, setUTitle] = useState("");
-    const [uFile, setUFile] = useState(null);
-    const [uVisibility, setUVisibility] = useState("public");
-    const [uAllowIds, setUAllowIds] = useState([]);
-    const [uploading, setUploading] = useState(false);
 
     // create folder
     const [openCreateFolder, setOpenCreateFolder] = useState(false);
@@ -283,8 +288,37 @@ export default function Materials() {
     const [emVisibility, setEMVisibility] = useState("public");
     const [emAllowIds, setEMAllowIds] = useState([]);
 
+    const [openAudio, setOpenAudio] = useState(false);
+    const [audioSrc, setAudioSrc] = useState("");
+    const [audioTitle, setAudioTitle] = useState("");
+
     const [loading, setLoading] = useState(true);
     const [err, setErr] = useState("");
+
+    const [sortBy, setSortBy] = useState("time_desc");
+    const [audioMime, setAudioMime] = useState("");
+    const [audioExt, setAudioExt] = useState("");
+
+    async function openAudioPlayer(m) {
+        // setAudioTitle(m.title || m.originalName);
+
+        // setAudioSrc("");
+        // setOpenAudio(true);
+
+        // try {
+        //     const blobUrl = await getAudioBlobUrl(token, m._id);
+        //     setAudioSrc(blobUrl);
+        // } catch (e) {
+        //     setErr(e.message || "Không phát được audio");
+        //     setOpenAudio(false);
+        // }
+
+        setAudioTitle(m.title || m.originalName);
+        setAudioSrc(absUrl(m.storagePath)); // mp3/mp4 local
+        setAudioMime(m.mimeType || "");
+        setAudioExt(m.ext || "");
+        setOpenAudio(true);
+    }
 
     async function refreshDrive(nextFolderId = folderId, nextQ = q) {
         setErr("");
@@ -339,15 +373,36 @@ export default function Materials() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    const filteredMaterials = useMemo(() => {
+    const viewMaterials = useMemo(() => {
         const k = q.trim().toLowerCase();
-        if (!k) return materials;
-        return materials.filter((m) => {
-            const a = (m.title || "").toLowerCase();
-            const b = (m.originalName || "").toLowerCase();
-            return a.includes(k) || b.includes(k);
+
+        let arr = Array.isArray(materials) ? [...materials] : [];
+
+        // filter
+        if (k) {
+            arr = arr.filter((m) => {
+                const a = (m.title || "").toLowerCase();
+                const b = (m.originalName || "").toLowerCase();
+                return a.includes(k) || b.includes(k);
+            });
+        }
+
+        // sort
+        const byName = (x) =>
+            (x?.title || x?.originalName || "").trim().toLowerCase();
+        const byTime = (x) => new Date(x?.createdAt || 0).getTime() || 0;
+
+        arr.sort((a, b) => {
+            if (sortBy === "name_asc")
+                return byName(a).localeCompare(byName(b), "vi");
+            if (sortBy === "name_desc")
+                return byName(b).localeCompare(byName(a), "vi");
+            if (sortBy === "time_asc") return byTime(a) - byTime(b);
+            return byTime(b) - byTime(a); // time_desc default
         });
-    }, [materials, q]);
+
+        return arr;
+    }, [materials, q, sortBy]);
 
     async function onEnterFolder(id) {
         setFolderId(id);
@@ -363,36 +418,6 @@ export default function Materials() {
     }
     async function onRefresh() {
         await refreshDrive(folderId, q);
-    }
-
-    async function onUpload(e) {
-        e.preventDefault();
-        if (!uFile) return setErr("Bạn chưa chọn file");
-
-        setErr("");
-        setUploading(true);
-        try {
-            await uploadMaterialApi(token, {
-                title: uTitle,
-                file: uFile,
-                folderId: folderId || null,
-                // ✅ quyền upload (tuỳ BE: kế thừa folder hoặc override)
-                visibility: uVisibility,
-                allowTeacherIds: uVisibility === "restricted" ? uAllowIds : [],
-            });
-
-            setOpenUpload(false);
-            setUTitle("");
-            setUFile(null);
-            setUVisibility("public");
-            setUAllowIds([]);
-
-            await refreshDrive(folderId, q);
-        } catch (e2) {
-            setErr(e2.message || "Upload thất bại");
-        } finally {
-            setUploading(false);
-        }
     }
 
     async function onDeleteMaterial(m) {
@@ -539,6 +564,18 @@ export default function Materials() {
         return "Công khai";
     }
 
+    function fmtTime(iso) {
+        if (!iso) return "—";
+        const d = new Date(iso);
+        return d.toLocaleString("vi-VN", {
+            hour: "2-digit",
+            minute: "2-digit",
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+        });
+    }
+
     return (
         <div className="max-w-full">
             <div className="mb-4 flex flex-col gap-3">
@@ -561,6 +598,18 @@ export default function Materials() {
                     />
 
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                        <select
+                            value={sortBy}
+                            onChange={(e) => setSortBy(e.target.value)}
+                            className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm sm:w-[220px]"
+                            title="Sắp xếp"
+                        >
+                            <option value="time_desc">Mới upload → Cũ</option>
+                            <option value="time_asc">Cũ → Mới upload</option>
+                            <option value="name_asc">Tên A → Z</option>
+                            <option value="name_desc">Tên Z → A</option>
+                        </select>
+
                         <input
                             value={q}
                             onChange={(e) => setQ(e.target.value)}
@@ -603,157 +652,189 @@ export default function Materials() {
 
             <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white">
                 <div className="grid grid-cols-12 border-b border-zinc-200 bg-zinc-50 px-4 py-3 text-xs font-semibold text-zinc-600">
-                    <div className="col-span-7">Tên</div>
+                    <div className="col-span-5">Tên</div>
+                    <div className="col-span-2">Ngày tạo</div>
                     <div className="col-span-2">Quyền</div>
                     <div className="col-span-3 text-right">Thao tác</div>
                 </div>
-
-                {loading ? (
-                    <div className="px-4 py-4 text-sm">Đang tải...</div>
-                ) : folders.length === 0 && filteredMaterials.length === 0 ? (
-                    <div className="px-4 py-6 text-sm text-zinc-500">
-                        Thư mục trống
-                    </div>
-                ) : (
-                    <>
-                        {/* folders */}
-                        {folders.map((f) => (
-                            <div
-                                key={f._id}
-                                className="grid grid-cols-12 items-center gap-3 px-4 py-3 text-sm hover:bg-zinc-50"
-                            >
-                                <div className="col-span-7 min-w-0">
-                                    <button
-                                        onClick={() => onEnterFolder(f._id)}
-                                        className="flex w-full items-center gap-3 text-left"
-                                        title={f.name}
-                                    >
-                                        <div className="grid h-8 w-8 place-items-center rounded-lg bg-zinc-100 text-zinc-700">
-                                            📁
-                                        </div>
-                                        <div className="min-w-0">
-                                            <div className="truncate font-medium">
-                                                {f.name}
-                                            </div>
-                                        </div>
-                                    </button>
-                                </div>
-
-                                <div className="col-span-2">
-                                    <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs text-zinc-700">
-                                        {badgeVisibility(f.visibility)}
-                                    </span>
-                                </div>
-
-                                <div className="col-span-3 text-right">
-                                    {user?.role === "admin" ? (
-                                        <div className="flex justify-end gap-2">
-                                            <button
-                                                onClick={() =>
-                                                    openEditFolderModal(f)
-                                                }
-                                                className="rounded-lg border border-zinc-200 bg-white px-3 py-1 text-xs hover:bg-zinc-50"
-                                                title="Sửa folder + phân quyền"
-                                            >
-                                                Sửa
-                                            </button>
-
-                                            <button
-                                                onClick={() =>
-                                                    onDeleteFolder(f)
-                                                }
-                                                className="rounded-lg border border-red-200 bg-red-50 px-3 py-1 text-xs text-red-700 hover:bg-red-100"
-                                                title="Xoá folder"
-                                            >
-                                                Xoá
-                                            </button>
-                                        </div>
-                                    ) : (
-                                        <span className="text-xs text-zinc-400" />
-                                    )}
-                                </div>
-                            </div>
-                        ))}
-
-                        {/* materials */}
-                        {filteredMaterials.map((m) => {
-                            const icon = pickIcon(
-                                m.originalName || m.title,
-                                m.mimeType
-                            );
-                            return (
+                <div className="h-[calc(100vh-280px)] overflow-auto">
+                    {loading ? (
+                        <div className="px-4 py-4 text-sm">Đang tải...</div>
+                    ) : folders.length === 0 && viewMaterials.length === 0 ? (
+                        <div className="px-4 py-6 text-sm text-zinc-500">
+                            Thư mục trống
+                        </div>
+                    ) : (
+                        <>
+                            {/* folders */}
+                            {folders.map((f) => (
                                 <div
-                                    key={m._id}
+                                    key={f._id}
                                     className="grid grid-cols-12 items-center gap-3 px-4 py-3 text-sm hover:bg-zinc-50"
                                 >
-                                    <div className="col-span-7 min-w-0">
-                                        <div className="flex items-center gap-3">
-                                            <div
-                                                className={`grid h-8 w-8 place-items-center rounded-lg text-xs font-bold text-white ${icon.cls}`}
-                                            >
-                                                {icon.label}
+                                    <div className="col-span-5 min-w-0">
+                                        <button
+                                            onClick={() => onEnterFolder(f._id)}
+                                            className="flex w-full items-center gap-3 text-left"
+                                            title={f.name}
+                                        >
+                                            <div className="grid h-8 w-8 place-items-center rounded-lg bg-zinc-100 text-zinc-700">
+                                                📁
                                             </div>
-
                                             <div className="min-w-0">
                                                 <div className="truncate font-medium">
-                                                    {m.title}
-                                                </div>
-                                                <div className="truncate text-xs text-zinc-500">
-                                                    {m.originalName} •{" "}
-                                                    {fmtSize(m.size)}
+                                                    {f.name}
                                                 </div>
                                             </div>
-                                        </div>
+                                        </button>
+                                    </div>
+
+                                    <div className="col-span-2 min-w-0">
+                                        <span className="text-gray-600 text-xs">
+                                            {fmtTime(f.createdAt)}
+                                        </span>
                                     </div>
 
                                     <div className="col-span-2">
                                         <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs text-zinc-700">
-                                            {badgeVisibility(m.visibility)}
+                                            {badgeVisibility(f.visibility)}
                                         </span>
                                     </div>
 
                                     <div className="col-span-3 text-right">
-                                        <div className="flex justify-end gap-2">
-                                            <a
-                                                target="_blank"
-                                                href={`/viewer/${m._id}`}
-                                                className="rounded-lg border border-zinc-200 px-3 py-1 text-xs hover:bg-white"
-                                            >
-                                                Xem
-                                            </a>
+                                        {user?.role === "admin" ? (
+                                            <div className="flex justify-end gap-2">
+                                                <button
+                                                    onClick={() =>
+                                                        openEditFolderModal(f)
+                                                    }
+                                                    className="rounded-lg border border-zinc-200 bg-white px-3 py-1 text-xs hover:bg-zinc-50"
+                                                    title="Sửa folder + phân quyền"
+                                                >
+                                                    Sửa
+                                                </button>
 
-                                            {user?.role === "admin" && (
-                                                <>
-                                                    <button
-                                                        onClick={() =>
-                                                            openEditMaterialModal(
-                                                                m
-                                                            )
-                                                        }
-                                                        className="rounded-lg border border-zinc-200 bg-white px-3 py-1 text-xs hover:bg-zinc-50"
-                                                        title="Sửa phân quyền tài liệu"
-                                                    >
-                                                        Sửa
-                                                    </button>
-
-                                                    <button
-                                                        onClick={() =>
-                                                            onDeleteMaterial(m)
-                                                        }
-                                                        className="rounded-lg border border-red-200 bg-red-50 px-3 py-1 text-xs text-red-700 hover:bg-red-100"
-                                                        title="Xoá"
-                                                    >
-                                                        Xoá
-                                                    </button>
-                                                </>
-                                            )}
-                                        </div>
+                                                <button
+                                                    onClick={() =>
+                                                        onDeleteFolder(f)
+                                                    }
+                                                    className="rounded-lg border border-red-200 bg-red-50 px-3 py-1 text-xs text-red-700 hover:bg-red-100"
+                                                    title="Xoá folder"
+                                                >
+                                                    Xoá
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <span className="text-xs text-zinc-400" />
+                                        )}
                                     </div>
                                 </div>
-                            );
-                        })}
-                    </>
-                )}
+                            ))}
+
+                            {/* materials */}
+                            {viewMaterials.map((m) => {
+                                const icon = pickIcon(
+                                    m.originalName || m.title,
+                                    m.mimeType
+                                );
+
+                                return (
+                                    <div
+                                        key={m._id}
+                                        className="grid grid-cols-12 items-center gap-3 px-4 py-3 text-sm hover:bg-zinc-50"
+                                    >
+                                        <div className="col-span-5 min-w-0">
+                                            <div className="flex items-center gap-3">
+                                                <div
+                                                    className={`grid h-8 w-8 place-items-center rounded-lg text-xs font-bold text-white ${icon.cls}`}
+                                                >
+                                                    {icon.label}
+                                                </div>
+
+                                                <div className="min-w-0">
+                                                    <div className="truncate font-medium">
+                                                        {m.title}
+                                                    </div>
+                                                    <div className="truncate text-xs text-zinc-500">
+                                                        {fmtSize(m.size)}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="col-span-2 min-w-0">
+                                            <span className="text-gray-600 text-xs">
+                                                {fmtTime(m.createdAt)}
+                                            </span>
+                                        </div>
+
+                                        <div className="col-span-2">
+                                            <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs text-zinc-700">
+                                                {badgeVisibility(m.visibility)}
+                                            </span>
+                                        </div>
+
+                                        <div className="col-span-3 text-right">
+                                            <div className="flex justify-end gap-2">
+                                                {[
+                                                    "audio/mpeg",
+                                                    "audio/wav",
+                                                    "audio/mp4",
+                                                    "video/mp4",
+                                                ].includes(m.mimeType) ? (
+                                                    <span
+                                                        onClick={() =>
+                                                            openAudioPlayer(m)
+                                                        }
+                                                        className="rounded-lg border border-zinc-200 px-3 py-1 text-xs hover:bg-white cursor-pointer"
+                                                    >
+                                                        Play
+                                                    </span>
+                                                ) : (
+                                                    <a
+                                                        target="_blank"
+                                                        href={`/viewer/${m._id}`}
+                                                        className="rounded-lg border border-zinc-200 px-3 py-1 text-xs hover:bg-white"
+                                                    >
+                                                        Xem
+                                                    </a>
+                                                )}
+
+                                                {user?.role === "admin" && (
+                                                    <>
+                                                        <button
+                                                            onClick={() =>
+                                                                openEditMaterialModal(
+                                                                    m
+                                                                )
+                                                            }
+                                                            className="rounded-lg border border-zinc-200 bg-white px-3 py-1 text-xs hover:bg-zinc-50"
+                                                            title="Sửa phân quyền tài liệu"
+                                                        >
+                                                            Sửa
+                                                        </button>
+
+                                                        <button
+                                                            onClick={() =>
+                                                                onDeleteMaterial(
+                                                                    m
+                                                                )
+                                                            }
+                                                            className="rounded-lg border border-red-200 bg-red-50 px-3 py-1 text-xs text-red-700 hover:bg-red-100"
+                                                            title="Xoá"
+                                                        >
+                                                            Xoá
+                                                        </button>
+                                                    </>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </>
+                    )}
+                </div>
             </div>
 
             <UploadMaterialsModal
@@ -782,6 +863,15 @@ export default function Materials() {
                 onUploadedDone={async () => {
                     await refreshDrive(folderId || "", q);
                 }}
+            />
+
+            <MediaPlayerModal
+                open={openAudio}
+                onClose={() => setOpenAudio(false)}
+                title={audioTitle}
+                src={audioSrc}
+                mimeType={audioMime}
+                ext={audioExt}
             />
 
             {/* create folder modal */}

@@ -155,70 +155,72 @@ export default function ActivityLogs() {
                     <div className="col-span-2 text-right">Chi tiết</div>
                 </div>
 
-                {loading ? (
-                    <div className="px-4 py-4 text-sm">Đang tải...</div>
-                ) : items.length === 0 ? (
-                    <div className="px-4 py-6 text-sm text-zinc-500">
-                        Chưa có log
-                    </div>
-                ) : (
-                    items.map((x) => (
-                        <div
-                            key={x._id}
-                            className="grid grid-cols-12 items-center gap-2 px-4 py-3 text-sm hover:bg-zinc-50"
-                        >
-                            <div className="col-span-3 text-zinc-700">
-                                {fmtTime(x.createdAt)}
-                            </div>
-
-                            <div className="col-span-3 min-w-0">
-                                <div className="truncate font-medium">
-                                    {x.userId?.name || "-"}
-                                </div>
-                                <div className="truncate text-xs text-zinc-500">
-                                    {x.userEmail || x.userId?.email || "-"}
-                                </div>
-                            </div>
-
-                            <div className="col-span-2">
-                                <Badge>
-                                    {x.action === "MATERIAL_VIEW"
-                                        ? "XEM TÀI LIỆU"
-                                        : x.action}
-                                </Badge>
-                            </div>
-
-                            <div className="col-span-2">
-                                <div className="text-zinc-700">
-                                    {x.ip || "-"}
-                                </div>
-                                <div className="truncate text-xs text-zinc-500">
-                                    {x.ua?.browser
-                                        ? `${x.ua.browser}${
-                                              x.ua.version
-                                                  ? ` ${x.ua.version}`
-                                                  : ""
-                                          }`
-                                        : ""}
-                                </div>
-                            </div>
-
-                            <div className="col-span-2 text-right">
-                                {x.action === "MATERIAL_VIEW" ? (
-                                    <div className="text-xs text-zinc-600">
-                                        <div className="truncate">
-                                            {x.materialId?.title ||
-                                                x.meta?.title ||
-                                                "Tài liệu"}
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div className="truncate text-xs text-zinc-500"></div>
-                                )}
-                            </div>
+                <div className="h-[calc(100vh-280px)] overflow-auto">
+                    {loading ? (
+                        <div className="px-4 py-4 text-sm">Đang tải...</div>
+                    ) : items.length === 0 ? (
+                        <div className="px-4 py-6 text-sm text-zinc-500">
+                            Chưa có log
                         </div>
-                    ))
-                )}
+                    ) : (
+                        items.map((x) => (
+                            <div
+                                key={x._id}
+                                className="grid grid-cols-12 items-center gap-2 px-4 py-3 text-sm hover:bg-zinc-50"
+                            >
+                                <div className="col-span-3 text-zinc-700">
+                                    {fmtTime(x.createdAt)}
+                                </div>
+
+                                <div className="col-span-3 min-w-0">
+                                    <div className="truncate font-medium">
+                                        {x.userId?.name || "-"}
+                                    </div>
+                                    <div className="truncate text-xs text-zinc-500">
+                                        {x.userEmail || x.userId?.email || "-"}
+                                    </div>
+                                </div>
+
+                                <div className="col-span-2">
+                                    <Badge>
+                                        {x.action === "MATERIAL_VIEW"
+                                            ? "XEM TÀI LIỆU"
+                                            : x.action}
+                                    </Badge>
+                                </div>
+
+                                <div className="col-span-2">
+                                    <div className="text-zinc-700">
+                                        {x.ip || "-"}
+                                    </div>
+                                    <div className="truncate text-xs text-zinc-500">
+                                        {x.ua?.browser
+                                            ? `${x.ua.browser}${
+                                                  x.ua.version
+                                                      ? ` ${x.ua.version}`
+                                                      : ""
+                                              }`
+                                            : ""}
+                                    </div>
+                                </div>
+
+                                <div className="col-span-2 text-right">
+                                    {x.action === "MATERIAL_VIEW" ? (
+                                        <div className="text-xs text-zinc-600">
+                                            <div className="truncate">
+                                                {x.materialId?.title ||
+                                                    x.meta?.title ||
+                                                    "Tài liệu"}
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="truncate text-xs text-zinc-500"></div>
+                                    )}
+                                </div>
+                            </div>
+                        ))
+                    )}
+                </div>
             </div>
 
             {/* pagination */}

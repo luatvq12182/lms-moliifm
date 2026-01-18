@@ -112,3 +112,15 @@ export async function patchMaterialPermissionsApi(token, id, payload) {
     });
     return parseJson(res);
 }
+
+export async function getAudioBlobUrl(token, id) {
+    const res = await fetch(`${API_BASE}/api/materials/${id}/audio`, {
+        headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.message || `HTTP ${res.status}`);
+    }
+    const blob = await res.blob();
+    return URL.createObjectURL(blob);
+}

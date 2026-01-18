@@ -1,4 +1,5 @@
 const fs = require("fs");
+const fsp = require("fs/promises");
 const path = require("path");
 const { canAccessMaterial } = require("../utils/acl");
 const Material = require("../models/Material");
@@ -8,6 +9,8 @@ const {
     uploadPptxAsGoogleSlides,
     setPermissionAnyoneReader,
     uploadDocxAsGoogleDocs,
+    getSlides,
+    uploadAudioToDrive,
 } = require("../services/googleDrive.service");
 const { getTeacherAccessIds } = require("../utils/access");
 const { writeLog } = require("../services/activityLog.service");
@@ -66,7 +69,8 @@ async function listMaterials(req, res) {
 async function uploadMaterial(req, res) {
     const { title, folderId } = req.body || {};
     if (!req.file) return res.status(400).json({ message: "file is required" });
-    if (req.user.role !== "admin") return res.status(403).json({ message: "forbidden" });
+    if (req.user.role !== "admin")
+        return res.status(403).json({ message: "forbidden" });
 
     const originalName = req.file.originalname;
     const fileName = String(title || originalName).trim();
@@ -76,39 +80,89 @@ async function uploadMaterial(req, res) {
         return parts.length > 1 ? parts.pop().toLowerCase() : "";
     })();
 
-    // lấy quyền kế thừa từ folder (như bạn đã làm)
+    // lấy quyền kế thừa từ folder
     let finalFolderId = folderId ? String(folderId) : null;
     let visibility = "public";
     let allowTeacherIds = [];
     if (finalFolderId) {
-        const folder = await Folder.findOne({ _id: finalFolderId, isActive: true }).select("_id visibility allowTeacherIds");
+        const folder = await Folder.findOne({
+            _id: finalFolderId,
+            isActive: true,
+        }).select("_id visibility allowTeacherIds");
         if (!folder) return res.status(400).json({ message: "invalid folderId" });
         visibility = folder.visibility || "public";
-        allowTeacherIds = Array.isArray(folder.allowTeacherIds) ? folder.allowTeacherIds : [];
+        allowTeacherIds = Array.isArray(folder.allowTeacherIds)
+            ? folder.allowTeacherIds
+            : [];
     }
 
+    let provider = "google";
     let googleMeta = null;
+    let storagePath = "";
 
-    if (ext === "pptx" || ext === "ppt") {
-        const { fileId, previewUrl, webViewLink } = await uploadPptxAsGoogleSlides({
-            localPath: req.file.path,
-            fileName,
-        });
-        await setPermissionAnyoneReader(fileId);
-        googleMeta = { fileId, previewUrl, webViewLink, kind: "slides" };
-    } else if (ext === "docx" || ext === "doc") {
-        const { fileId, previewUrl, webViewLink } = await uploadDocxAsGoogleDocs({
-            localPath: req.file.path,
-            fileName,
-        });
-        await setPermissionAnyoneReader(fileId);
-        googleMeta = { fileId, previewUrl, webViewLink, kind: "docs" };
-    } else {
-        return res.status(400).json({ message: "only pptx/docx supported for now" });
+    try {
+        if (ext === "pptx" || ext === "ppt") {
+            const { fileId, previewUrl, webViewLink } =
+                await uploadPptxAsGoogleSlides({
+                    localPath: req.file.path,
+                    fileName,
+                });
+
+            await setPermissionAnyoneReader(fileId);
+            googleMeta = { fileId, previewUrl, webViewLink, kind: "slides" };
+        } else if (ext === "docx" || ext === "doc") {
+            const { fileId, previewUrl, webViewLink } =
+                await uploadDocxAsGoogleDocs({
+                    localPath: req.file.path,
+                    fileName,
+                });
+
+            await setPermissionAnyoneReader(fileId);
+            googleMeta = { fileId, previewUrl, webViewLink, kind: "docs" };
+        } else if (ext === "mp3" || ext === "wav" || ext === "m4a" || ext === "ogg") {
+            // ✅ AUDIO: lưu local trên host
+            provider = "local";
+
+            const audioDir = path.join(process.cwd(), "uploads", "audio");
+            await fsp.mkdir(audioDir, { recursive: true });
+
+            const safeFile =
+                `${Date.now()}-${Math.random().toString(16).slice(2)}` +
+                `.${ext}`;
+            const destAbs = path.join(audioDir, safeFile);
+
+            // move tmp -> uploads/audio
+            await fsp.rename(req.file.path, destAbs);
+
+            // lưu relative path vào DB
+            storagePath = path.posix.join("uploads", "audio", safeFile);
+        } else if (ext === "mp4") {
+            provider = "local";
+
+            const videoDir = path.join(process.cwd(), "uploads", "video");
+            await fsp.mkdir(videoDir, { recursive: true });
+
+            const safeName =
+                `${Date.now()}-${Math.random().toString(16).slice(2)}.${ext}`;
+            const dest = path.join(videoDir, safeName);
+
+            await fsp.rename(req.file.path, dest);
+
+            storagePath = path.posix.join("uploads", "video", safeName);
+        } else {
+            return res
+                .status(400)
+                .json({ message: "only pptx/docx/audio supported for now" });
+        }
+    } finally {
+        // nếu là google thì file tmp vẫn còn -> xoá
+        // còn audio thì đã rename nên path cũ không còn
+        if (provider === "google") {
+            fs.unlink(req.file.path, (err) => {
+                if (err) console.error("Failed to remove local file:", err);
+            });
+        }
     }
-
-    // xoá file local
-    fs.unlink(req.file.path, (err) => err && console.error("Failed to remove local file:", err));
 
     const doc = await Material.create({
         title: fileName,
@@ -121,17 +175,28 @@ async function uploadMaterial(req, res) {
         visibility,
         allowTeacherIds,
         isActive: true,
-        provider: "google",
-        google: {
-            fileId: googleMeta.fileId,
-            previewUrl: googleMeta.previewUrl,
-            webViewLink: googleMeta.webViewLink,
-            kind: googleMeta.kind, // 'slides' | 'docs'
-        },
-        storagePath: "", // nếu schema còn required thì để tạm, tốt nhất bỏ required
+
+        provider,
+
+        // google
+        google:
+            provider === "google"
+                ? {
+                    fileId: googleMeta.fileId,
+                    previewUrl: googleMeta.previewUrl,
+                    webViewLink: googleMeta.webViewLink,
+                    kind: googleMeta.kind, // 'slides' | 'docs'
+                }
+                : null,
+
+        // local
+        storagePath: provider === "local" ? storagePath : "",
     });
 
-    const populated = await Material.findById(doc._id).populate("uploaderId", "name email role");
+    const populated = await Material.findById(doc._id).populate(
+        "uploaderId",
+        "name email role"
+    );
     return res.status(201).json({ material: populated });
 }
 
@@ -214,17 +279,49 @@ async function getEmbed(req, res) {
 
     const g = doc.google || {};
     const fileId = g.fileId;
+    let slideData = []; // Mảng chứa ID và Thumbnail
 
     let previewUrl = g.previewUrl || "";
 
-    // slides => embed minimal
-    if (g.kind === "slides" && fileId) {
-        previewUrl = `https://docs.google.com/presentation/d/${fileId}/embed?start=false&loop=false&delayms=3000&rm=minimal`;
+    if (doc.ext === "pptx" && fileId) {
+        try {
+            const slides = getSlides();
+
+            const presentation = await slides.presentations.get({
+                presentationId: fileId,
+            });
+
+            slideData = await Promise.all(
+                presentation.data.slides.map(async (slide, index) => {
+                    const thumb = await slides.presentations.pages.getThumbnail({
+                        presentationId: fileId,
+                        pageObjectId: slide.objectId,
+                    });
+
+                    return {
+                        index: index + 1,
+                        objectId: slide.objectId,
+                        thumbnailUrl: thumb.data.contentUrl // Link ảnh thực tế
+                    };
+                })
+            );
+        } catch (err) {
+            console.error("Lỗi lấy thông tin slide:", err);
+        }
+
+        // previewUrl = `https://docs.google.com/presentation/d/${fileId}/embed?start=false&loop=false&delayms=3000&rm=minimal`;
     }
 
     // docs => preview
     if (g.kind === "docs" && fileId) {
         previewUrl = `https://docs.google.com/document/d/${fileId}/preview`;
+    }
+
+    console.log(g.kind);
+
+    if (g.kind === "audio" && fileId) {
+        // trả link public để FE gắn vào <audio src>
+        previewUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
     }
 
     // ✅ log MATERIAL_VIEW (đừng để log làm fail request)
@@ -245,7 +342,7 @@ async function getEmbed(req, res) {
         console.error("writeLog MATERIAL_VIEW failed:", e?.message || e);
     }
 
-    return res.json({ previewUrl });
+    return res.json({ previewUrl, slideData });
 }
 
 function buildMaterialPermissionFilter(user, access) {
@@ -371,6 +468,51 @@ async function uploadManyMaterials(req, res) {
     });
 };
 
+async function streamAudio(req, res) {
+    const ok = await canAccessMaterial(req.user, req.params.id);
+    if (!ok) return res.status(403).json({ message: "forbidden" });
+
+    const doc = await Material.findById(req.params.id);
+    if (!doc || !doc.isActive) return res.status(404).json({ message: "not found" });
+    if (doc.provider !== "local") return res.status(400).json({ message: "not a local file" });
+
+    const rel = doc.storagePath || "";
+    if (!rel) return res.status(400).json({ message: "missing storagePath" });
+
+    const filePath = path.join(process.cwd(), rel); // rel: uploads/audio/xxx.mp3
+    if (!fs.existsSync(filePath)) return res.status(404).json({ message: "file missing" });
+
+    const stat = fs.statSync(filePath);
+    const fileSize = stat.size;
+    const range = req.headers.range;
+
+    res.setHeader("Content-Type", doc.mimeType || "audio/mpeg");
+    res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Cache-Control", "no-store"); // tránh 304 làm player đứng
+
+    if (!range) {
+        res.setHeader("Content-Length", fileSize);
+        fs.createReadStream(filePath).pipe(res);
+        return;
+    }
+
+    // Range: bytes=start-end
+    const m = String(range).match(/bytes=(\d+)-(\d*)/);
+    const start = m ? parseInt(m[1], 10) : 0;
+    const end = m && m[2] ? parseInt(m[2], 10) : fileSize - 1;
+
+    if (start >= fileSize) {
+        res.status(416).setHeader("Content-Range", `bytes */${fileSize}`).end();
+        return;
+    }
+
+    res.status(206);
+    res.setHeader("Content-Range", `bytes ${start}-${end}/${fileSize}`);
+    res.setHeader("Content-Length", end - start + 1);
+
+    fs.createReadStream(filePath, { start, end }).pipe(res);
+}
+
 module.exports = {
     listMaterials,
     uploadMaterial,
@@ -379,5 +521,6 @@ module.exports = {
     uploadManyMaterials,
     deleteMaterial,
     getEmbed,
-    patchMaterialPermissions
+    patchMaterialPermissions,
+    streamAudio
 };

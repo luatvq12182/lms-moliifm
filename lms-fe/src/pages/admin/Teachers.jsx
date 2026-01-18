@@ -346,47 +346,49 @@ export default function Teachers() {
                     <div className="col-span-2 text-right">Thao tác</div>
                 </div>
 
-                {loading ? (
-                    <div className="px-4 py-4 text-sm">Đang tải...</div>
-                ) : (
-                    filtered.map((u) => (
-                        <div
-                            key={u._id}
-                            className="grid grid-cols-12 items-center px-4 py-3 text-sm hover:bg-zinc-50"
-                        >
-                            <div className="col-span-4 flex items-center gap-3 font-medium">
-                                <Avatar
-                                    url={absUrl(u.avatarUrl)}
-                                    name={u.name}
-                                    size={34}
-                                />
-                                <span className="truncate">{u.name}</span>
+                <div className="h-[calc(100vh-280px)] overflow-auto">
+                    {loading ? (
+                        <div className="px-4 py-4 text-sm">Đang tải...</div>
+                    ) : (
+                        filtered.map((u) => (
+                            <div
+                                key={u._id}
+                                className="grid grid-cols-12 items-center px-4 py-3 text-sm hover:bg-zinc-50"
+                            >
+                                <div className="col-span-4 flex items-center gap-3 font-medium">
+                                    <Avatar
+                                        url={absUrl(u.avatarUrl)}
+                                        name={u.name}
+                                        size={34}
+                                    />
+                                    <span className="truncate">{u.name}</span>
+                                </div>
+                                <div className="col-span-4 truncate text-zinc-700">
+                                    {u.email}
+                                </div>
+                                <div className="col-span-2">
+                                    <span
+                                        className={`rounded-full bg-zinc-100 px-3 py-1 text-xs text-zinc-700 border ${
+                                            u.isActive
+                                                ? "border-green-600"
+                                                : "border-red-600"
+                                        }`}
+                                    >
+                                        {u.isActive ? "Hoạt động" : "Tạm khóa"}
+                                    </span>
+                                </div>
+                                <div className="col-span-2 text-right">
+                                    <button
+                                        onClick={() => openEditModal(u)}
+                                        className="rounded-lg border border-zinc-200 px-3 py-1 text-xs hover:bg-white"
+                                    >
+                                        Sửa
+                                    </button>
+                                </div>
                             </div>
-                            <div className="col-span-4 truncate text-zinc-700">
-                                {u.email}
-                            </div>
-                            <div className="col-span-2">
-                                <span
-                                    className={`rounded-full bg-zinc-100 px-3 py-1 text-xs text-zinc-700 border ${
-                                        u.isActive
-                                            ? "border-green-600"
-                                            : "border-red-600"
-                                    }`}
-                                >
-                                    {u.isActive ? "Hoạt động" : "Tạm khóa"}
-                                </span>
-                            </div>
-                            <div className="col-span-2 text-right">
-                                <button
-                                    onClick={() => openEditModal(u)}
-                                    className="rounded-lg border border-zinc-200 px-3 py-1 text-xs hover:bg-white"
-                                >
-                                    Sửa
-                                </button>
-                            </div>
-                        </div>
-                    ))
-                )}
+                        ))
+                    )}
+                </div>
             </div>
 
             {/* create modal */}
@@ -501,7 +503,11 @@ export default function Teachers() {
                     {/* avatar */}
                     <div className="flex items-center gap-3">
                         <Avatar
-                            url={eAvatarPreview || absUrl(editUser?.avatarUrl) || ""}
+                            url={
+                                eAvatarPreview ||
+                                absUrl(editUser?.avatarUrl) ||
+                                ""
+                            }
                             name={eName}
                             size={48}
                         />

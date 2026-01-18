@@ -22,6 +22,62 @@ function getDrive() {
     return google.drive({ version: "v3", auth });
 }
 
+function getSlides() {
+    const auth = getOAuthClient();
+    return google.slides({ version: 'v1', auth });
+}
+
+async function uploadAudioToDrive({ localPath, fileName, mimeType = "audio/mpeg" }) {
+    // const auth = getOAuthClient();
+    // const drive = google.drive({ version: "v3", auth });
+
+    // const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID || undefined;
+
+    // const res = await drive.files.create({
+    //     requestBody: {
+    //         name: fileName,
+    //         parents: folderId ? [folderId] : undefined,
+    //         mimeType: mimeType, // giữ nguyên audio
+    //     },
+    //     media: {
+    //         mimeType: mimeType,
+    //         body: fs.createReadStream(localPath),
+    //     },
+    //     fields: "id,name,mimeType,webViewLink",
+    // });
+
+    // const fileId = res.data.id;
+    // const previewUrl = `https://drive.google.com/file/d/${fileId}/view`;
+
+    // return { fileId, previewUrl, webViewLink: res.data.webViewLink };
+
+    const auth = getOAuthClient();
+    const drive = google.drive({ version: "v3", auth });
+
+    const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID || undefined;
+
+    const res = await drive.files.create({
+        requestBody: {
+            name: fileName,
+            parents: folderId ? [folderId] : undefined,
+            // giữ nguyên file audio, KHÔNG set mimeType google-apps.*
+        },
+        media: {
+            mimeType: mimeType || "audio/mpeg",
+            body: fs.createReadStream(localPath),
+        },
+        fields: "id,name,mimeType,webViewLink",
+    });
+
+    const fileId = res.data.id;
+
+    // link public để gắn vào <audio src="...">
+    // dùng uc?export=download để lấy raw bytes (audio tag sẽ phát được)
+    const publicUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
+
+    return { fileId, publicUrl, webViewLink: res.data.webViewLink };
+}
+
 async function uploadDocxAsGoogleDocs({ localPath, fileName }) {
     const drive = getDrive();
 
@@ -72,6 +128,7 @@ async function uploadDocxAsGoogleDocs({ localPath, fileName }) {
 async function uploadPptxAsGoogleSlides({ localPath, fileName }) {
     const auth = getOAuthClient();
     const drive = google.drive({ version: "v3", auth });
+    const slides = google.slides({ version: 'v1', auth });
 
     const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID || undefined;
 
@@ -91,6 +148,13 @@ async function uploadPptxAsGoogleSlides({ localPath, fileName }) {
         fields: "id,name,mimeType,webViewLink",
     });
 
+    const presentationId = res.data.id;
+
+    // 2. Lấy danh sách Slide và Thumbnail
+    const response = await slides.presentations.get({
+        presentationId: presentationId,
+    });
+
     const fileId = res.data.id;
     const previewUrl = `https://docs.google.com/presentation/d/${fileId}/preview`;
 
@@ -104,6 +168,7 @@ async function setPermissionAnyoneReader(fileId) {
 
     await drive.permissions.create({
         fileId,
+        supportsAllDrives: true,
         requestBody: { type: "anyone", role: "reader" },
     });
 }
@@ -120,6 +185,8 @@ async function setPermissionDomainReader(fileId, domain) {
 }
 
 module.exports = {
+    getSlides,
+    uploadAudioToDrive,
     uploadPptxAsGoogleSlides,
     uploadDocxAsGoogleDocs,
     setPermissionAnyoneReader,

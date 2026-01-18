@@ -23,5 +23,6 @@ router.delete("/:id", requireRole("admin"), ctrl.deleteMaterial);
 
 router.get("/:id/file", ctrl.downloadFile);
 router.get("/:id/embed", ctrl.getEmbed);
+router.get("/:id/audio", ctrl.streamAudio);
 
 module.exports = router;
