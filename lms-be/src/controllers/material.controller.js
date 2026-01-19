@@ -12,7 +12,7 @@ const {
     getSlides,
     uploadAudioToDrive,
 } = require("../services/googleDrive.service");
-const { getTeacherAccessIds } = require("../utils/access");
+// const { getTeacherAccessIds } = require("../utils/access");
 const { writeLog } = require("../services/activityLog.service");
 
 function pickExt(filename) {
@@ -269,81 +269,81 @@ async function deleteMaterial(req, res) {
     return res.json({ ok: true });
 }
 
-async function getEmbed(req, res) {
-    const ok = await canAccessMaterial(req.user, req.params.id);
-    if (!ok) return res.status(403).json({ message: "forbidden" });
+// async function getEmbed(req, res) {
+//     const ok = await canAccessMaterial(req.user, req.params.id);
+//     if (!ok) return res.status(403).json({ message: "forbidden" });
 
-    const doc = await Material.findById(req.params.id);
-    if (!doc || !doc.isActive)
-        return res.status(404).json({ message: "not found" });
+//     const doc = await Material.findById(req.params.id);
+//     if (!doc || !doc.isActive)
+//         return res.status(404).json({ message: "not found" });
 
-    const g = doc.google || {};
-    const fileId = g.fileId;
-    let slideData = []; // Mảng chứa ID và Thumbnail
+//     const g = doc.google || {};
+//     const fileId = g.fileId;
+//     let slideData = [];
 
-    let previewUrl = g.previewUrl || "";
+//     let previewUrl = g.previewUrl || "";
 
-    if (doc.ext === "pptx" && fileId) {
-        try {
-            const slides = getSlides();
+//     if (doc.ext === "pptx" && fileId) {
+//         try {
+//             const slides = getSlides();
 
-            const presentation = await slides.presentations.get({
-                presentationId: fileId,
-            });
+//             const presentation = await slides.presentations.get({
+//                 presentationId: fileId,
+//             });
 
-            slideData = await Promise.all(
-                presentation.data.slides.map(async (slide, index) => {
-                    const thumb = await slides.presentations.pages.getThumbnail({
-                        presentationId: fileId,
-                        pageObjectId: slide.objectId,
-                    });
+//             slideData = await Promise.all(
+//                 presentation.data.slides.map(async (slide, index) => {
+//                     const thumb = await slides.presentations.pages.getThumbnail({
+//                         presentationId: fileId,
+//                         pageObjectId: slide.objectId,
+//                     });
 
-                    return {
-                        index: index + 1,
-                        objectId: slide.objectId,
-                        thumbnailUrl: thumb.data.contentUrl // Link ảnh thực tế
-                    };
-                })
-            );
-        } catch (err) {
-            console.error("Lỗi lấy thông tin slide:", err);
-        }
+//                     return {
+//                         index: index + 1,
+//                         objectId: slide.objectId,
+//                         thumbnailUrl: thumb.data.contentUrl // Link ảnh thực tế
+//                     };
+//                 })
+//             );
+//         } catch (err) {
+//             console.error("Lỗi lấy thông tin slide:", err);
+//         }
 
-        // previewUrl = `https://docs.google.com/presentation/d/${fileId}/embed?start=false&loop=false&delayms=3000&rm=minimal`;
-    }
+//         // previewUrl = `https://docs.google.com/presentation/d/${fileId}/embed?start=false&loop=false&delayms=3000&rm=minimal`;
+//     }
 
-    // docs => preview
-    if (g.kind === "docs" && fileId) {
-        previewUrl = `https://docs.google.com/document/d/${fileId}/preview`;
-    }
+//     // docs => preview
+//     if (g.kind === "docs" && fileId) {
+//         previewUrl = `https://docs.google.com/document/d/${fileId}/preview`;
+//     }
 
-    console.log(g.kind);
+//     console.log(g.kind);
 
-    if (g.kind === "audio" && fileId) {
-        // trả link public để FE gắn vào <audio src>
-        previewUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
-    }
+//     if (g.kind === "audio" && fileId) {
+//         // trả link public để FE gắn vào <audio src>
+//         previewUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
+//     }
 
-    // ✅ log MATERIAL_VIEW (đừng để log làm fail request)
-    try {
-        await writeLog(req, "MATERIAL_VIEW", {
-            materialId: doc._id,
-            folderId: doc.folderId || null,
-            meta: {
-                title: doc.title || "",
-                originalName: doc.originalName || "",
-                ext: doc.ext || "",
-                provider: doc.provider || "",
-                kind: g.kind || "",
-                googleFileId: fileId || "",
-            },
-        });
-    } catch (e) {
-        console.error("writeLog MATERIAL_VIEW failed:", e?.message || e);
-    }
+//     // ✅ log MATERIAL_VIEW (đừng để log làm fail request)
+//     try {
+//         await writeLog(req, "MATERIAL_VIEW", {
+//             materialId: doc._id,
+//             folderId: doc.folderId || null,
+//             meta: {
+//                 title: doc.title || "",
+//                 originalName: doc.originalName || "",
+//                 ext: doc.ext || "",
+//                 provider: doc.provider || "",
+//                 kind: g.kind || "",
+//                 googleFileId: fileId || "",
+//             },
+//         });
+//     } catch (e) {
+//         console.error("writeLog MATERIAL_VIEW failed:", e?.message || e);
+//     }
 
-    return res.json({ previewUrl, slideData });
-}
+//     return res.json({ previewUrl, slideData });
+// }
 
 function buildMaterialPermissionFilter(user, access) {
     if (user.role === "admin") return { isActive: true };
@@ -513,6 +513,340 @@ async function streamAudio(req, res) {
     fs.createReadStream(filePath, { start, end }).pipe(res);
 }
 
+function parseGoogleDriveLink(url) {
+    if (!url) return null;
+
+    const u = url.trim();
+
+    // docs
+    let m = u.match(/docs\.google\.com\/document\/d\/([^/]+)/);
+    if (m) {
+        return {
+            kind: "docs",
+            sourceUrl: `https://docs.google.com/document/d/${m[1]}`,
+            fileId: m[1],
+        };
+    }
+
+    // slides
+    m = u.match(/docs\.google\.com\/presentation\/d\/([^/]+)/);
+    if (m) {
+        return {
+            kind: "slides",
+            sourceUrl: `https://docs.google.com/presentation/d/${m[1]}`,
+            fileId: m[1],
+        };
+    }
+
+    // sheets
+    m = u.match(/docs\.google\.com\/spreadsheets\/d\/([^/]+)/);
+    if (m) {
+        return {
+            kind: "sheets",
+            sourceUrl: `https://docs.google.com/spreadsheets/d/${m[1]}`,
+            fileId: m[1],
+        };
+    }
+
+    return null;
+}
+
+async function uploadGoogleMaterial(req, res) {
+    const { title, sourceUrl, folderId } = req.body;
+    if (req.user.role !== "admin") return res.sendStatus(403);
+
+    let perm;
+    try {
+        perm = await inheritFolderPermission(folderId);
+    } catch (e) {
+        return res.status(e.status || 400).json({ message: e.message || "invalid folderId" });
+    }
+
+    const {
+        kind,
+        fileId,
+    } = parseGoogleDriveLink(sourceUrl);
+
+    if (!sourceUrl || !kind)
+        return res.status(400).json({ message: "sourceUrl & kind required" });
+
+    // extract fileId
+    const m = sourceUrl.match(/\/d\/([a-zA-Z0-9_-]+)/);
+    if (!m) return res.status(400).json({ message: "invalid google link" });
+
+    // const fileId = m[1];
+
+    const doc = await Material.create({
+        title: title.trim(),
+        provider: "google",
+        google: {
+            fileId,
+            kind,
+            sourceUrl,
+        },
+        uploaderId: req.user._id,
+        folderId: folderId || null,
+        visibility: perm.visibility,
+        allowTeacherIds: perm.allowTeacherIds,
+    });
+
+    return res.status(201).json({ material: doc });
+}
+
+async function uploadLocalMaterial(req, res) {
+    if (!req.file) return res.status(400).json({ message: "file required" });
+
+    const { folderId } = req.body || {};
+    let perm;
+    try {
+        perm = await inheritFolderPermission(folderId);
+    } catch (e) {
+        return res.status(e.status || 400).json({ message: e.message || "invalid folderId" });
+    }
+
+    const ext = path.extname(req.file.originalname).toLowerCase();
+    const isAudio = [".mp3", ".wav", ".m4a", ".ogg"].includes(ext);
+    const isVideo = [".mp4", ".webm"].includes(ext);
+    const isImage = [".jpg", ".jpeg", ".png", ".webp"].includes(ext);
+
+    if (!isAudio && !isVideo && !isImage)
+        return res.status(400).json({ message: "unsupported file" });
+
+    const baseDir = isAudio
+        ? "uploads/audio"
+        : isVideo
+            ? "uploads/video"
+            : "uploads/image";
+
+    await fsp.mkdir(baseDir, { recursive: true });
+
+    const safeName = `${Date.now()}-${Math.random().toString(16).slice(2)}${ext}`;
+    const dest = path.join(baseDir, safeName);
+
+    await fsp.rename(req.file.path, dest);
+
+    const doc = await Material.create({
+        title: req.body.title || req.file.originalname,
+        originalName: req.file.originalname,
+        mimeType: req.file.mimetype,
+        size: req.file.size,
+        provider: "local",
+        storagePath: dest.replace(/\\/g, "/"),
+        uploaderId: req.user._id,
+        folderId: req.body.folderId || null,
+        visibility: perm.visibility,
+        allowTeacherIds: perm.allowTeacherIds,
+    });
+
+    res.status(201).json({ material: doc });
+}
+
+async function serveLocalFile(req, res) {
+    const doc = await Material.findById(req.params.id);
+    if (!doc || doc.provider !== "local") return res.sendStatus(404);
+
+    res.sendFile(path.resolve(doc.storagePath));
+}
+
+async function getEmbed(req, res) {
+    const ok = await canAccessMaterial(req.user, req.params.id);
+    if (!ok) return res.status(403).json({ message: "forbidden" });
+
+    const doc = await Material.findById(req.params.id);
+    if (!doc || !doc.isActive) return res.sendStatus(404);
+
+    const g = doc.google || {};
+
+    if (req.user.role === 'teacher') {
+        try {
+            await writeLog(req, "MATERIAL_VIEW", {
+                materialId: doc._id,
+                folderId: doc.folderId || null,
+                meta: {
+                    title: doc.title || "",
+                    ext: doc.ext || "",
+                    provider: doc.provider || "",
+                    kind: g.kind || "",
+                    googleFileId: g.fileId || "",
+                },
+            });
+        } catch (e) {
+            console.error("writeLog MATERIAL_VIEW failed:", e?.message || e);
+        }
+    }
+
+    if (doc.provider === "google") {
+        const { fileId, kind } = doc.google;
+
+        let previewUrl = "";
+
+        if (kind === "slides") {
+            previewUrl = `https://docs.google.com/presentation/d/${fileId}/embed?start=false&loop=false&delayms=3000&rm=minimal`;
+        } else if (kind === "docs") {
+            previewUrl = `https://docs.google.com/document/d/${fileId}/preview`;
+        } else if (kind === "sheets") {
+            previewUrl = `https://docs.google.com/spreadsheets/d/${fileId}/preview`;
+        }
+
+        return res.json({ previewUrl });
+    }
+
+    // local
+    return res.json({
+        previewUrl: `/api/materials/${doc._id}/file`,
+        mimeType: doc.mimeType,
+    });
+}
+
+// tuỳ bạn mở rộng
+const AUDIO_EXT = new Set(["mp3", "wav", "m4a", "ogg"]);
+const VIDEO_EXT = new Set(["mp4", "webm", "mov"]);
+const IMAGE_EXT = new Set(["jpg", "jpeg", "png", "webp", "gif"]);
+
+function getExtFromName(name = "") {
+    const ext = path.extname(String(name)).toLowerCase();
+    return ext.startsWith(".") ? ext.slice(1) : ext; // "mp3"
+}
+
+function randomSafeName(ext) {
+    return `${Date.now()}-${Math.random().toString(16).slice(2)}.${ext}`;
+}
+
+function toPosix(p) {
+    return String(p || "").split(path.sep).join(path.posix.sep);
+}
+
+async function inheritFolderPermission(folderId) {
+    let finalFolderId = folderId ? String(folderId) : null;
+    let visibility = "public";
+    let allowTeacherIds = [];
+
+    if (finalFolderId) {
+        const folder = await Folder.findOne({ _id: finalFolderId, isActive: true }).select(
+            "_id visibility allowTeacherIds"
+        );
+        if (!folder) {
+            const err = new Error("invalid folderId");
+            err.status = 400;
+            throw err;
+        }
+        visibility = folder.visibility || "public";
+        allowTeacherIds = Array.isArray(folder.allowTeacherIds) ? folder.allowTeacherIds : [];
+    }
+
+    return { finalFolderId, visibility, allowTeacherIds };
+}
+
+// ✅ UPLOAD MANY LOCAL
+async function uploadManyLocalMaterials(req, res) {
+    if (req.user.role !== "admin") return res.status(403).json({ message: "forbidden" });
+    if (!Array.isArray(req.files) || req.files.length === 0) {
+        return res.status(400).json({ message: "files is required" });
+    }
+
+    const { folderId } = req.body || {};
+    let perm;
+    try {
+        perm = await inheritFolderPermission(folderId);
+    } catch (e) {
+        return res.status(e.status || 400).json({ message: e.message || "invalid folderId" });
+    }
+
+    const results = [];
+
+    // chạy tuần tự để đỡ vỡ RAM/IO (và dễ debug)
+    for (let i = 0; i < req.files.length; i++) {
+        const file = req.files[i];
+
+        // nếu FE gửi titles[i] hoặc displayTitles[] thì lấy ở đây
+        // ✅ tương thích 2 kiểu:
+        // - displayTitles[] (array)
+        // - displayTitles["<filename>"] (tuỳ bạn)
+        const displayTitles = req.body?.displayTitles || req.body?.titles || [];
+        const title =
+            (Array.isArray(displayTitles) ? displayTitles[i] : "") ||
+            req.body?.title || // fallback
+            "";
+
+        const originalName = file.originalname;
+        const ext = getExtFromName(originalName);
+
+        const fileName = String(title || originalName).trim();
+
+        // validate loại local cho phép
+        const isAudio = AUDIO_EXT.has(ext);
+        const isVideo = VIDEO_EXT.has(ext);
+        const isImage = IMAGE_EXT.has(ext);
+
+        if (!isAudio && !isVideo && !isImage) {
+            // dọn tmp
+            try { await fsp.unlink(file.path); } catch { }
+            results.push({
+                index: i,
+                ok: false,
+                originalName,
+                error: `file not supported: .${ext}`,
+            });
+            continue;
+        }
+
+        try {
+            const subDir = isAudio ? "audio" : isVideo ? "video" : "images";
+            const destDir = path.join(process.cwd(), "uploads", subDir);
+            await fsp.mkdir(destDir, { recursive: true });
+
+            const safeName = randomSafeName(ext);
+            const destAbs = path.join(destDir, safeName);
+
+            // move tmp -> uploads
+            await fsp.rename(file.path, destAbs);
+
+            const storagePath = toPosix(path.posix.join("uploads", subDir, safeName));
+
+            const doc = await Material.create({
+                title: fileName,
+                originalName,
+                mimeType: file.mimetype,
+                ext,
+                size: file.size,
+
+                uploaderId: req.user._id,
+                folderId: perm.finalFolderId,
+
+                visibility: perm.visibility,
+                allowTeacherIds: perm.allowTeacherIds,
+
+                isActive: true,
+
+                provider: "local",
+                google: null,
+                storagePath,
+            });
+
+            results.push({
+                index: i,
+                ok: true,
+                material: doc,
+            });
+        } catch (e) {
+            // dọn tmp nếu còn
+            try { await fsp.unlink(file.path); } catch { }
+            results.push({
+                index: i,
+                ok: false,
+                originalName,
+                error: e.message || "upload failed",
+            });
+        }
+    }
+
+    return res.status(201).json({
+        items: results,
+        successCount: results.filter((x) => x.ok).length,
+        failCount: results.filter((x) => !x.ok).length,
+    });
+};
+
 module.exports = {
     listMaterials,
     uploadMaterial,
@@ -522,5 +856,9 @@ module.exports = {
     deleteMaterial,
     getEmbed,
     patchMaterialPermissions,
-    streamAudio
+    streamAudio,
+    uploadGoogleMaterial,
+    uploadLocalMaterial,
+    uploadManyLocalMaterials,
+    serveLocalFile
 };

@@ -17,16 +17,16 @@ const storage = multer.diskStorage({
 const allowedExt = new Set(
     [".pptx", ".pdf", ".docx", ".ppt", ".doc", ".xlsx", ".xls", ".mp3", ".wav", ".m4a", ".mp4"]
 );
+
 function fileFilter(req, file, cb) {
     const ext = path.extname(file.originalname || "").toLowerCase();
     if (!allowedExt.has(ext)) return cb(new Error("file type not allowed"));
     cb(null, true);
 }
 
-const uploadMaterial = multer({
+const uploadLocal = multer({
     storage,
-    fileFilter,
-    limits: { fileSize: 500 * 1024 * 1024 }, // 100MB
+    limits: { fileSize: 500 * 1024 * 1024 }, // 500MB
 });
 
-module.exports = { uploadMaterial };
+module.exports = { uploadLocal };

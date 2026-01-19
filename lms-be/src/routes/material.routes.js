@@ -1,28 +1,51 @@
 const router = require("express").Router();
 const auth = require("../middleware/auth");
 const requireRole = require("../middleware/requireRole");
-const { uploadMaterial } = require("../config/upload");
+const { uploadLocal } = require("../config/upload"); // đổi tên cho rõ
 const ctrl = require("../controllers/material.controller");
 
 router.use(auth);
 
+// ================== LIST ==================
 router.get("/", ctrl.listMaterials);
+// ================== UPLOAD ==================
 
-// ✅ upload admin-only
-router.post("/upload", requireRole("admin"), uploadMaterial.single("file"), ctrl.uploadMaterial);
+// 🔹 1. GOOGLE MATERIAL (chỉ gửi link + title)
 router.post(
-    "/upload-many",
+    "/upload/google",
     requireRole("admin"),
-    uploadMaterial.array("files", 50), // cho phép tối đa 50 file / lần
-    ctrl.uploadManyMaterials
+    ctrl.uploadGoogleMaterial
 );
 
+// 🔹 2. LOCAL FILE (audio / video / image)
+router.post(
+    "/upload/local",
+    requireRole("admin"),
+    uploadLocal.single("file"),
+    ctrl.uploadLocalMaterial
+);
+
+// 🔹 3. LOCAL FILE - upload nhiều
+router.post(
+    "/upload/local-many",
+    requireRole("admin"),
+    uploadLocal.array("files", 50),
+    ctrl.uploadManyLocalMaterials
+);
+
+// ================== UPDATE ==================
 router.patch("/:id", requireRole("admin"), ctrl.updateMaterial);
-router.patch("/:id/permissions", auth, ctrl.patchMaterialPermissions);
+router.patch("/:id/permissions", requireRole("admin"), ctrl.patchMaterialPermissions);
+
+// ================== DELETE ==================
 router.delete("/:id", requireRole("admin"), ctrl.deleteMaterial);
 
-router.get("/:id/file", ctrl.downloadFile);
+// ================== VIEW ==================
+
+// 🔹 dùng cho slide / doc / sheet / media
 router.get("/:id/embed", ctrl.getEmbed);
-router.get("/:id/audio", ctrl.streamAudio);
+
+// 🔹 serve file local (audio / video / image)
+router.get("/:id/file", ctrl.serveLocalFile);
 
 module.exports = router;

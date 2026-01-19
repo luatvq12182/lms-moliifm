@@ -43,7 +43,7 @@ export default function SlideViewer() {
     const [isFullscreen, setIsFullscreen] = useState(false);
 
     // sidebar
-    const [sidebarOpen, setSidebarOpen] = useState(true);
+    const [sidebarOpen, setSidebarOpen] = useState(false);
 
     // trick: force iframe re-mount when changing slide (more reliable)
     const [iframeKey, setIframeKey] = useState(0);
@@ -123,7 +123,7 @@ export default function SlideViewer() {
         <div ref={containerRef} className="h-screen w-screen bg-black">
             {/* top bar */}
             <div className="flex items-center justify-between px-3 py-2 text-white">
-                <div className="flex items-center gap-2">
+                {/* <div className="flex items-center gap-2">
                     <button
                         onClick={() => setSidebarOpen((v) => !v)}
                         className="rounded-lg bg-white/10 px-3 py-1.5 text-sm hover:bg-white/15"
@@ -131,7 +131,7 @@ export default function SlideViewer() {
                     >
                         {sidebarOpen ? "☰ Ẩn trang" : "☰ Hiện trang"}
                     </button>
-                </div>
+                </div> */}
 
                 <div className="flex items-center gap-2">
                     <button

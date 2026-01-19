@@ -2,13 +2,11 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../../context/AuthContext.jsx";
 import {
     listMaterialsApi,
-    uploadMaterialApi,
     deleteMaterialApi,
-    // patchMaterialApi,
     patchMaterialPermissionsApi,
     patchMaterialApi,
-    // getMaterialEmbedApi,
-    getAudioBlobUrl,
+    uploadLocalMaterialApi,
+    createMaterialFromGoogleLinkApi,
 } from "../../api/materials";
 import {
     listFoldersApi,
@@ -408,14 +406,17 @@ export default function Materials() {
         setFolderId(id);
         await refreshDrive(id, q);
     }
+
     async function onGoRoot() {
         setFolderId("");
         await refreshDrive("", q);
     }
+
     async function onGoCrumb(id) {
         setFolderId(id);
         await refreshDrive(id, q);
     }
+
     async function onRefresh() {
         await refreshDrive(folderId, q);
     }
@@ -573,6 +574,30 @@ export default function Materials() {
             day: "2-digit",
             month: "2-digit",
             year: "numeric",
+        });
+    }
+
+    async function uploadOneLocal({
+        folderId,
+        visibility,
+        allowTeacherIds,
+        file,
+        title,
+    }) {
+        await uploadLocalMaterialApi(token, {
+            title,
+            file,
+            folderId,
+            visibility,
+            allowTeacherIds,
+        });
+    }
+
+    async function createOneFromLink(payload) {
+        await createMaterialFromGoogleLinkApi(token, {
+            title: payload.title,
+            sourceUrl: payload.googleLink,
+            folderId: payload.folderId || null,
         });
     }
 
@@ -781,6 +806,10 @@ export default function Materials() {
                                                     "audio/wav",
                                                     "audio/mp4",
                                                     "video/mp4",
+                                                    "image/jpeg",
+                                                    "image/jpg",
+                                                    "image/png",
+                                                    "image/webp",
                                                 ].includes(m.mimeType) ? (
                                                     <span
                                                         onClick={() =>
@@ -788,7 +817,7 @@ export default function Materials() {
                                                         }
                                                         className="rounded-lg border border-zinc-200 px-3 py-1 text-xs hover:bg-white cursor-pointer"
                                                     >
-                                                        Play
+                                                        Xem
                                                     </span>
                                                 ) : (
                                                     <a
@@ -845,24 +874,9 @@ export default function Materials() {
                 isAdmin={user?.role === "admin"}
                 teachers={teachers}
                 absUrl={absUrl}
-                uploadOne={async ({
-                    folderId,
-                    visibility,
-                    allowTeacherIds,
-                    file,
-                    title,
-                }) => {
-                    await uploadMaterialApi(token, {
-                        folderId,
-                        visibility,
-                        allowTeacherIds,
-                        file,
-                        title,
-                    });
-                }}
-                onUploadedDone={async () => {
-                    await refreshDrive(folderId || "", q);
-                }}
+                uploadOneLocal={uploadOneLocal}
+                createOneFromGoogleLink={createOneFromLink}
+                onUploadedDone={onRefresh}
             />
 
             <MediaPlayerModal
