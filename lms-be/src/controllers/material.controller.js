@@ -14,6 +14,8 @@ const {
 } = require("../services/googleDrive.service");
 // const { getTeacherAccessIds } = require("../utils/access");
 const { writeLog } = require("../services/activityLog.service");
+const { getSlidesMeta, getThumbnailUrl } = require("../services/googleSlides.service");
+const { exportSlideThumbnail } = require("../services/slideThumbnail.service");
 
 function pickExt(filename) {
     return path.extname(filename || "").replace(".", "").toLowerCase();
@@ -59,6 +61,34 @@ async function listMaterials(req, res) {
     }).sort({ createdAt: -1 });
 
     return res.json({ items });
+}
+
+async function getThumbnail(req, res) {
+    const { id, thumb_id, index } = req.params;
+
+    const material = await Material.findById(id);
+
+    const thumb = await exportSlideThumbnail({
+        materialId: material.google.fileId,
+        slideId: thumb_id,
+        index,
+    });
+
+    material.google.slides = material.google.slides.map((e) => {
+        if (e.slideId === thumb_id) {
+            return {
+                ...e,
+                "thumbnailPath": thumb.path,
+                "thumbnailUrl": thumb.url
+            }
+        }
+
+        return e;
+    })
+
+    await material.save();
+
+    res.json(thumb);
 }
 
 /**
@@ -551,46 +581,132 @@ function parseGoogleDriveLink(url) {
     return null;
 }
 
+/**
+ * Phân tích Google Drive link để xác định loại file
+ * @param {string} url
+ * @returns { fileId, kind, lastKnownMimeType }
+ */
+function parseGoogleLinkAdvanced(url = "") {
+    if (!url || typeof url !== "string") return null;
+
+    const idMatch = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+    if (!idMatch) return null;
+
+    const fileId = idMatch[1];
+    const isRtpof = url.includes("rtpof=true");
+
+    // Google Slides
+    if (url.includes("/presentation/d/")) {
+        if (isRtpof) {
+            // PPTX mở bằng Google Slides nhưng CHƯA convert
+            return {
+                fileId,
+                kind: "pptx",
+                lastKnownMimeType:
+                    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            };
+        }
+
+        return {
+            fileId,
+            kind: "slides",
+            lastKnownMimeType:
+                "application/vnd.google-apps.presentation",
+        };
+    }
+
+    // Google Docs
+    if (url.includes("/document/d/")) {
+        return {
+            fileId,
+            kind: "docs",
+            lastKnownMimeType:
+                "application/vnd.google-apps.document",
+        };
+    }
+
+    // Google Sheets
+    if (url.includes("/spreadsheets/d/")) {
+        return {
+            fileId,
+            kind: "sheets",
+            lastKnownMimeType:
+                "application/vnd.google-apps.spreadsheet",
+        };
+    }
+
+    return null;
+}
+
 async function uploadGoogleMaterial(req, res) {
     const { title, sourceUrl, folderId } = req.body;
-    if (req.user.role !== "admin") return res.sendStatus(403);
 
+    if (req.user.role !== "admin") {
+        return res.sendStatus(403);
+    }
+
+    if (!title || !sourceUrl) {
+        return res
+            .status(400)
+            .json({ message: "title & sourceUrl are required" });
+    }
+
+    // kiểm tra folder + permission
     let perm;
     try {
         perm = await inheritFolderPermission(folderId);
     } catch (e) {
-        return res.status(e.status || 400).json({ message: e.message || "invalid folderId" });
+        return res
+            .status(e.status || 400)
+            .json({ message: e.message || "invalid folderId" });
     }
 
-    const {
-        kind,
-        fileId,
-    } = parseGoogleDriveLink(sourceUrl);
+    // phân tích link Google
+    const parsed = parseGoogleLinkAdvanced(sourceUrl);
+    if (!parsed) {
+        return res
+            .status(400)
+            .json({ message: "invalid google drive link" });
+    }
 
-    if (!sourceUrl || !kind)
-        return res.status(400).json({ message: "sourceUrl & kind required" });
+    const { fileId, kind, lastKnownMimeType } = parsed;
 
-    // extract fileId
-    const m = sourceUrl.match(/\/d\/([a-zA-Z0-9_-]+)/);
-    if (!m) return res.status(400).json({ message: "invalid google link" });
+    // xác định trạng thái sync ban đầu
+    const isSlide = kind === "slides";
+    let slides = [];
 
-    // const fileId = m[1];
+    if (isSlide) {
+        slides = await getSlidesMeta(fileId);
+    }
 
     const doc = await Material.create({
         title: title.trim(),
         provider: "google",
+
         google: {
             fileId,
             kind,
             sourceUrl,
+            lastKnownMimeType,
+
+            slides: slides,
+            slidesSynced: false,
+            slidesSyncStatus: isSlide ? "pending" : "not_slides",
+            slidesRetryCount: 0,
+            slidesLastError: "",
+            slidesSyncedAt: null,
         },
+
         uploaderId: req.user._id,
         folderId: folderId || null,
         visibility: perm.visibility,
         allowTeacherIds: perm.allowTeacherIds,
     });
 
-    return res.status(201).json({ material: doc });
+    return res.status(201).json({
+        material: doc,
+        canSyncSlides: isSlide,
+    });
 }
 
 async function uploadLocalMaterial(req, res) {
@@ -657,14 +773,14 @@ async function getEmbed(req, res) {
 
     const g = doc.google || {};
 
-    if (req.user.role === 'teacher') {
+    // ===== log teacher view =====
+    if (req.user.role === "teacher") {
         try {
             await writeLog(req, "MATERIAL_VIEW", {
                 materialId: doc._id,
                 folderId: doc.folderId || null,
                 meta: {
                     title: doc.title || "",
-                    ext: doc.ext || "",
                     provider: doc.provider || "",
                     kind: g.kind || "",
                     googleFileId: g.fileId || "",
@@ -675,23 +791,49 @@ async function getEmbed(req, res) {
         }
     }
 
+    // ===== GOOGLE =====
     if (doc.provider === "google") {
-        const { fileId, kind } = doc.google;
+        const { fileId, kind, slides, slidesSyncStatus, slidesSyncedAt } = g;
 
         let previewUrl = "";
 
         if (kind === "slides") {
             previewUrl = `https://docs.google.com/presentation/d/${fileId}/embed?start=false&loop=false&delayms=3000&rm=minimal`;
-        } else if (kind === "docs") {
-            previewUrl = `https://docs.google.com/document/d/${fileId}/preview`;
-        } else if (kind === "sheets") {
-            previewUrl = `https://docs.google.com/spreadsheets/d/${fileId}/preview`;
+
+            return res.json({
+                previewUrl,
+                fileId,
+                slideData: Array.isArray(slides)
+                    ? slides.map((s) => ({
+                        index: s.index,
+                        slideId: s.slideId,
+                        thumbnailUrl: s.thumbnailUrl,
+                    }))
+                    : [],
+                slidesSyncStatus: slidesSyncStatus || "pending",
+                slidesSyncedAt: slidesSyncedAt || null,
+            });
         }
 
-        return res.json({ previewUrl });
+        if (kind === "docs") {
+            previewUrl = `https://docs.google.com/document/d/${fileId}/preview`;
+            return res.json({ previewUrl });
+        }
+
+        if (kind === "sheets") {
+            previewUrl = `https://docs.google.com/spreadsheets/d/${fileId}/preview`;
+            return res.json({ previewUrl });
+        }
+
+        // google but unsupported / not converted
+        return res.json({
+            previewUrl: "",
+            slidesSyncStatus: slidesSyncStatus || "not_slides",
+            message: "File chưa phải Google Slides",
+        });
     }
 
-    // local
+    // ===== LOCAL =====
     return res.json({
         previewUrl: `/api/materials/${doc._id}/file`,
         mimeType: doc.mimeType,
@@ -849,6 +991,7 @@ async function uploadManyLocalMaterials(req, res) {
 
 module.exports = {
     listMaterials,
+    getThumbnail,
     uploadMaterial,
     downloadFile,
     updateMaterial,

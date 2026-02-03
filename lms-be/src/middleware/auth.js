@@ -21,7 +21,7 @@ async function auth(req, res, next) {
         req.auth = payload; // {sub, role}
         next();
     } catch (err) {
-        return res.status(401).json({ message: "invalid token" });
+        return res.status(401).json({ message: "INVALID_TOKEN" });
     }
 }
 

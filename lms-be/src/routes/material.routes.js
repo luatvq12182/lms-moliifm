@@ -8,6 +8,7 @@ router.use(auth);
 
 // ================== LIST ==================
 router.get("/", ctrl.listMaterials);
+router.get("/:id/thumbnail/:thumb_id/:index", ctrl.getThumbnail);
 // ================== UPLOAD ==================
 
 // 🔹 1. GOOGLE MATERIAL (chỉ gửi link + title)

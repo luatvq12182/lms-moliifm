@@ -1,5 +1,6 @@
 const fs = require("fs");
 const { google } = require("googleapis");
+const oauth2Client = require("./googleAuth");
 
 function getOAuthClient() {
     const { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN } = process.env;
@@ -184,8 +185,29 @@ async function setPermissionDomainReader(fileId, domain) {
     });
 }
 
+/**
+ * Lấy metadata file từ Google Drive
+ * @param {string} fileId
+ * @returns { id, name, mimeType }
+ */
+async function getDriveFileMeta(fileId) {
+    const drive = google.drive({
+        version: "v3",
+        auth: oauth2Client,
+    });
+
+    const res = await drive.files.get({
+        fileId,
+        fields: "id,name,mimeType",
+        supportsAllDrives: true,
+    });
+
+    return res.data;
+}
+
 module.exports = {
     getSlides,
+    getDriveFileMeta,
     uploadAudioToDrive,
     uploadPptxAsGoogleSlides,
     uploadDocxAsGoogleDocs,
