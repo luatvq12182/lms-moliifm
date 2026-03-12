@@ -164,6 +164,17 @@ function AccessEditor({
                     <option value="public">Công khai (mọi giảng viên)</option>
                     <option value="restricted">Giới hạn theo giảng viên</option>
                 </select>
+                <aside style={{
+                    marginTop: '10px',
+                    padding: '12px 16px',
+                    background: '#fff3cd',
+                    borderLeft: '4px solid #f59e0b',
+                    borderRadius: '6px',
+                    fontSize: '13px',      
+                    fontStyle: 'italic'              
+                }} class="note">
+                    <strong>Lưu ý:</strong> Khi bạn cập nhật quyền truy cập của thư mục này, hệ thống sẽ tự động áp dụng quyền tương tự cho tất cả thư mục con bên trong.
+                </aside>
             </div>
 
             {isRestricted && (

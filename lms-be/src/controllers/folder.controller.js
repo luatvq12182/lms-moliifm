@@ -76,57 +76,140 @@ exports.createFolder = async (req, res) => {
     return res.status(201).json({ folder });
 };
 
+async function getDescendantFolderIds(folderId) {
+    const result = [];
+
+    async function traverse(parentId) {
+        const children = await Folder.find({
+            parentId,
+            isActive: true
+        }).select("_id");
+
+        for (const child of children) {
+            result.push(child._id);
+            await traverse(child._id);
+        }
+    }
+
+    await traverse(folderId);
+    return result;
+}
+
+// OLD 12/3/2026
+// exports.updateFolder = async (req, res) => {
+//     const { id } = req.params;
+//     const { name, parentId, visibility, allowTeacherIds } = req.body || {};
+
+//     const folder = await Folder.findOne({ _id: id, isActive: true });
+//     if (!folder) return res.status(404).json({ message: "not found" });
+
+//     // name
+//     if (typeof name === "string" && name.trim()) folder.name = name.trim();
+
+//     // move folder
+//     if (parentId !== undefined) {
+//         if (!parentId) {
+//             folder.parentId = null;
+//         } else {
+//             const parent = await Folder.findOne({ _id: parentId, isActive: true });
+//             if (!parent) return res.status(404).json({ message: "parent not found" });
+//             if (String(parent._id) === String(folder._id)) {
+//                 return res.status(400).json({ message: "cannot move into itself" });
+//             }
+//             folder.parentId = parent._id;
+//         }
+//     }
+
+//     // ✅ permissions
+//     if (visibility !== undefined) {
+//         if (!["public", "restricted"].includes(visibility)) {
+//             return res.status(400).json({ message: "invalid visibility" });
+//         }
+//         folder.visibility = visibility;
+
+//         // nếu chuyển về public thì clear list
+//         if (visibility === "public") {
+//             folder.allowTeacherIds = [];
+//         }
+//     }
+
+//     // allowTeacherIds chỉ có ý nghĩa khi restricted
+//     if (allowTeacherIds !== undefined) {
+//         // cho phép truyền [] để xoá hết
+//         if (!Array.isArray(allowTeacherIds)) {
+//             return res.status(400).json({ message: "allowTeacherIds must be array" });
+//         }
+//         // cast về string để tránh ObjectId lẫn lộn
+//         const uniq = Array.from(new Set(allowTeacherIds.map(String))).filter(Boolean);
+//         folder.allowTeacherIds = uniq;
+//         // nếu có list => auto restricted cho chắc
+//         folder.visibility = "restricted";
+//     }
+
+//     await folder.save();
+//     res.json({ folder });
+// };
+
+// NEW UPDATE 12/3/2026
 exports.updateFolder = async (req, res) => {
     const { id } = req.params;
-    const { name, parentId, visibility, allowTeacherIds } = req.body || {};
+    const { name, visibility, allowTeacherIds } = req.body || {};
 
     const folder = await Folder.findOne({ _id: id, isActive: true });
     if (!folder) return res.status(404).json({ message: "not found" });
 
-    // name
-    if (typeof name === "string" && name.trim()) folder.name = name.trim();
-
-    // move folder
-    if (parentId !== undefined) {
-        if (!parentId) {
-            folder.parentId = null;
-        } else {
-            const parent = await Folder.findOne({ _id: parentId, isActive: true });
-            if (!parent) return res.status(404).json({ message: "parent not found" });
-            if (String(parent._id) === String(folder._id)) {
-                return res.status(400).json({ message: "cannot move into itself" });
-            }
-            folder.parentId = parent._id;
-        }
+    if (typeof name === "string" && name.trim()) {
+        folder.name = name.trim();
     }
 
-    // ✅ permissions
+    let permissionChanged = false;
+
+    // update visibility
     if (visibility !== undefined) {
         if (!["public", "restricted"].includes(visibility)) {
             return res.status(400).json({ message: "invalid visibility" });
         }
-        folder.visibility = visibility;
 
-        // nếu chuyển về public thì clear list
+        folder.visibility = visibility;
+        permissionChanged = true;
+
         if (visibility === "public") {
             folder.allowTeacherIds = [];
         }
     }
 
-    // allowTeacherIds chỉ có ý nghĩa khi restricted
+    // update teacher list
     if (allowTeacherIds !== undefined) {
-        // cho phép truyền [] để xoá hết
         if (!Array.isArray(allowTeacherIds)) {
             return res.status(400).json({ message: "allowTeacherIds must be array" });
         }
-        // cast về string để tránh ObjectId lẫn lộn
+
         const uniq = Array.from(new Set(allowTeacherIds.map(String))).filter(Boolean);
+
         folder.allowTeacherIds = uniq;
-        // nếu có list => auto restricted cho chắc
         folder.visibility = "restricted";
+        permissionChanged = true;
     }
 
     await folder.save();
+
+    // =============================
+    // CASCADE PERMISSION TO CHILDREN
+    // =============================
+    if (permissionChanged) {
+        const descendantIds = await getDescendantFolderIds(folder._id);
+
+        if (descendantIds.length) {
+            await Folder.updateMany(
+                { _id: { $in: descendantIds } },
+                {
+                    visibility: folder.visibility,
+                    allowTeacherIds: folder.allowTeacherIds
+                }
+            );
+        }
+    }
+
     res.json({ folder });
 };
 
